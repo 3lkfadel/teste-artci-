@@ -1,0 +1,16 @@
+Crée un fichier `.gitignore` avec ce contenu :
+```
+# Secrets
+backend/.env
+backend/env.example
+backend/*.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+frontend/dist/
+.env
