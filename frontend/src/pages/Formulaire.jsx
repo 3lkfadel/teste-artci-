@@ -174,6 +174,32 @@ function useDebounce(delay = 1200) {
   }
 }
 
+function FormattedMessage({ text }) {
+  const lines = text.split('\n')
+  return (
+    <div>
+      {lines.map((line, i) => {
+        // Titre ## ou ###
+        if (line.startsWith('### ')) return <div key={i} style={{ fontWeight: 600, fontSize: 13, marginTop: 8, marginBottom: 2 }}>{line.replace(/^###\s*/, '').replace(/[*#]/g, '')}</div>
+        if (line.startsWith('## '))  return <div key={i} style={{ fontWeight: 700, fontSize: 14, marginTop: 10, marginBottom: 4 }}>{line.replace(/^##\s*/, '').replace(/[*#]/g, '')}</div>
+        // Séparateur ---
+        if (line.trim() === '---') return <hr key={i} style={{ border: 'none', borderTop: '1px solid #ddd', margin: '6px 0' }} />
+        // Bullet point
+        if (line.startsWith('- ') || line.startsWith('• ')) return <div key={i} style={{ paddingLeft: 12, marginBottom: 2 }}>• {line.replace(/^[-•]\s*/, '').replace(/\*\*(.*?)\*\*/g, '$1')}</div>
+        // Ligne vide
+        if (line.trim() === '') return <div key={i} style={{ height: 4 }} />
+        // Ligne normale — nettoyer le gras **texte**
+        const parts = line.replace(/^[0-9️⃣]+\s*/, '').split(/\*\*(.*?)\*\*/g)
+        return (
+          <div key={i} style={{ marginBottom: 2 }}>
+            {parts.map((p, j) => j % 2 === 1 ? <strong key={j}>{p}</strong> : p)}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Composant Chat Assistant ─────────────────────────────────
 function ChatAssistant({ config, etape, donnees, visible, onClose }) {
   const [messages, setMessages] = useState([
@@ -275,12 +301,11 @@ function ChatAssistant({ config, etape, donnees, visible, onClose }) {
             maxWidth: '85%',
           }}>
             <div style={{
-              padding: '8px 12px', borderRadius: 8, fontSize: 13, lineHeight: 1.5,
+              padding: '8px 12px', borderRadius: 8, fontSize: 13, lineHeight: 1.6,
               background: m.role === 'user' ? '#111' : '#f5f5f5',
               color: m.role === 'user' ? '#fff' : '#111',
-              whiteSpace: 'pre-wrap',
             }}>
-              {m.text}
+              {m.role === 'user' ? m.text : <FormattedMessage text={m.text} />}
             </div>
           </div>
         ))}
