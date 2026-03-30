@@ -198,10 +198,8 @@ def sauvegarder_entreprise():
 # ASSISTANT IA
 # ═══════════════════════════════════════════════════════════════
 
-SYSTEM_IA = """Tu es l'assistant DPO d'Infinity Compliance, expert sur la Loi n°2013-450 de Côte d'Ivoire.
-Tu analyses les champs d'un formulaire ARTCI et fournis un feedback concis.
-Réponds UNIQUEMENT en JSON : {"type":"ok|warn|err|info","message":"ton message"}
-Sois bref (1-2 phrases max), pratique, en français professionnel."""
+from system_prompt import SYSTEM_IA
+
 
 
 @app.post('/api/ia/valider-champ')
