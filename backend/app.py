@@ -232,34 +232,42 @@ def valider_champ():
                     Sois bref (1-2 phrases max), pratique, en français professionnel."""
         prompt = f"Champ: {champ}\nValeur: {valeur}\nContexte: {ctx}\nAnalyse ce champ pour un formulaire ARTCI."
 
+    
     try:
         import anthropic
         client   = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model='claude-sonnet-4-6',
-            max_tokens=500 if mode == 'chat' else 150,
+            max_tokens=2048 if mode == 'chat' else 150,
             system=system,
             messages=[{'role': 'user', 'content': prompt}]
         )
         text = response.content[0].text.strip()
-        # Nettoyer les balises markdown
         text = text.replace('```json', '').replace('```', '').strip()
         try:
-            return jsonify(json.loads(text))
+            result = json.loads(text)
+            return jsonify(result)
         except json.JSONDecodeError:
-            # Si le JSON est malformé, extraire le message manuellement
+            # Extraire type et message manuellement
             import re
-            match = re.search(r'"message"\s*:\s*"(.*?)"(?:\s*[,}])', text, re.DOTALL)
-            if match:
-                message = match.group(1).replace('\n', ' ').replace('\\"', '"')
-                return jsonify({'type': 'info', 'message': message})
-            # Dernier recours : retourner le texte brut
-            return jsonify({'type': 'info', 'message': text[:500]})
-        
+            type_match = re.search(r'"type"\s*:\s*"(\w+)"', text)
+            # Extraire tout ce qui suit "message": " jusqu'à la fin
+            msg_match = re.search(r'"message"\s*:\s*"([\s\S]*)', text)
+            if msg_match:
+                message = msg_match.group(1)
+                # Supprimer le dernier " } si présent
+                message = re.sub(r'"\s*}?\s*$', '', message)
+                # Nettoyer les guillemets échappés
+                message = message.replace('\\"', '"')
+                return jsonify({
+                    'type': type_match.group(1) if type_match else 'info',
+                    'message': message
+                })
+            return jsonify({'type': 'info', 'message': text[:1000]})
     except Exception as e:
         return jsonify({'type': 'info', 'message': f'IA indisponible: {str(e)[:60]}'})
-
-
+    
+    
 @app.post('/api/ia/valider-formulaire')
 @jwt_required()
 def valider_formulaire():
