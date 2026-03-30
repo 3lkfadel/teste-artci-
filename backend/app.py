@@ -219,17 +219,17 @@ def valider_champ():
 
     if mode == 'chat':
         system = """Tu es un assistant DPO expert sur la Loi n°2013-450 de Côte d'Ivoire.
-Tu aides les utilisateurs à remplir leurs formulaires ARTCI.
-Tu connais le contexte du formulaire en cours (champs, étape, valeurs saisies).
-Réponds en JSON : {"type":"info","message":"ta réponse complète et utile"}
-Sois pédagogue, donne des exemples concrets adaptés à la CI.
-Si on te demande d'expliquer un champ, donne: ce que c'est, où le trouver, un exemple."""
+        Tu aides les utilisateurs à remplir leurs formulaires ARTCI.
+        Tu connais le contexte du formulaire en cours (champs, étape, valeurs saisies).
+        Réponds en JSON : {"type":"info","message":"ta réponse complète et utile"}
+        Sois pédagogue, donne des exemples concrets adaptés à la CI.
+        Si on te demande d'expliquer un champ, donne: ce que c'est, où le trouver, un exemple."""
         prompt = f"Contexte du formulaire:\n{ctx}\n\nQuestion de l'utilisateur: {valeur}"
     else:
         system = """Tu es l'assistant DPO d'Infinity Compliance, expert sur la Loi n°2013-450 de Côte d'Ivoire.
-Tu analyses les champs d'un formulaire ARTCI et fournis un feedback concis.
-Réponds UNIQUEMENT en JSON : {"type":"ok|warn|err|info","message":"ton message"}
-Sois bref (1-2 phrases max), pratique, en français professionnel."""
+                    Tu analyses les champs d'un formulaire ARTCI et fournis un feedback concis.
+                    Réponds UNIQUEMENT en JSON : {"type":"ok|warn|err|info","message":"ton message"}
+                    Sois bref (1-2 phrases max), pratique, en français professionnel."""
         prompt = f"Champ: {champ}\nValeur: {valeur}\nContexte: {ctx}\nAnalyse ce champ pour un formulaire ARTCI."
 
     try:
@@ -242,7 +242,20 @@ Sois bref (1-2 phrases max), pratique, en français professionnel."""
             messages=[{'role': 'user', 'content': prompt}]
         )
         text = response.content[0].text.strip()
-        return jsonify(json.loads(text.replace('```json', '').replace('```', '').strip()))
+        # Nettoyer les balises markdown
+        text = text.replace('```json', '').replace('```', '').strip()
+        try:
+            return jsonify(json.loads(text))
+        except json.JSONDecodeError:
+            # Si le JSON est malformé, extraire le message manuellement
+            import re
+            match = re.search(r'"message"\s*:\s*"(.*?)"(?:\s*[,}])', text, re.DOTALL)
+            if match:
+                message = match.group(1).replace('\n', ' ').replace('\\"', '"')
+                return jsonify({'type': 'info', 'message': message})
+            # Dernier recours : retourner le texte brut
+            return jsonify({'type': 'info', 'message': text[:500]})
+        
     except Exception as e:
         return jsonify({'type': 'info', 'message': f'IA indisponible: {str(e)[:60]}'})
 
