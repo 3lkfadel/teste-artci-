@@ -282,8 +282,7 @@ const S = {
           {v:'obligation_juridique',l:'Obligation juridique'},
           {v:'execution_contrat',l:"Exécution d'un contrat"},
           {v:'accord_bilateral',l:'Accord bilatéral CI'},
-          {v:'garanties_contractuelles',l:'Garanties contractuelles (clauses types, BCR...)"},
-        ] },
+{v:'garanties_contractuelles',l:'Garanties contractuelles (clauses types, BCR...)'},        ] },
     ],
   },
 
