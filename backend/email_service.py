@@ -1,40 +1,36 @@
 import os
-import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
-RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
-FROM_EMAIL     = 'onboarding@resend.dev'
-APP_NAME       = 'Infinity Compliance'
-APP_URL        = os.getenv('APP_URL', 'https://artci-frontend.onrender.com')
+APP_NAME = 'Infinity Compliance'
+APP_URL  = os.getenv('APP_URL', 'https://artci-frontend.onrender.com')
 
 
 def send_email(to: str, subject: str, html: str) -> bool:
-    if not RESEND_API_KEY:
-        print(f"[EMAIL] Clé RESEND manquante — email non envoyé à {to}")
+    gmail_user = os.getenv('GMAIL_USER', '')
+    gmail_pwd  = os.getenv('GMAIL_PASSWORD', '')
+
+    if not gmail_user or not gmail_pwd:
+        print(f"[EMAIL] Identifiants Gmail manquants — email non envoyé à {to}")
         return False
+
     try:
-        res = requests.post(
-            'https://api.resend.com/emails',
-            headers={
-                'Authorization': f'Bearer {RESEND_API_KEY}',
-                'Content-Type':  'application/json',
-            },
-            json={
-                'from':    f'{APP_NAME} <{FROM_EMAIL}>',
-                'to':      [to],
-                'subject': subject,
-                'html':    html,
-            },
-            timeout=10
-        )
-        if res.status_code in (200, 201):
-            print(f"[EMAIL] ✓ Envoyé à {to} — {subject}")
-            return True
-        else:
-            print(f"[EMAIL] ✗ Erreur {res.status_code} — {res.text}")
-            return False
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From']    = f'{APP_NAME} <{gmail_user}>'
+        msg['To']      = to
+        msg.attach(MIMEText(html, 'html'))
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(gmail_user, gmail_pwd)
+            server.sendmail(gmail_user, to, msg.as_string())
+
+        print(f"[EMAIL] ✓ Envoyé à {to} — {subject}")
+        return True
     except Exception as e:
-        print(f"[EMAIL] ✗ Exception — {e}")
+        print(f"[EMAIL] ✗ Erreur — {e}")
         return False
 
 
@@ -72,109 +68,12 @@ def _base_template(contenu: str) -> str:
     </div>
     <div class="footer">
       Cet email a été envoyé automatiquement par Infinity Compliance.<br>
-      Ne pas répondre à cet email. Pour toute question : support@infinity-africa.com
+      Ne pas répondre à cet email.
     </div>
   </div>
 </body>
 </html>
 """
-
-
-def send_otp_a2f(to: str, otp: str) -> bool:
-    contenu = f"""
-    <h2>Code de vérification</h2>
-    <p>Vous tentez de vous connecter à votre espace Infinity Compliance.<br>
-    Voici votre code de double authentification :</p>
-
-    <div class="otp">
-      <div class="otp-code">{otp}</div>
-      <div class="otp-info">Ce code est valable <strong>10 minutes</strong></div>
-    </div>
-
-    <div class="warning">
-      ⚠️ Si vous n'êtes pas à l'origine de cette connexion, ignorez cet email
-      et changez votre mot de passe immédiatement.
-    </div>
-
-    <p style="font-size:13px; color:#888;">
-      Heure d'envoi : {datetime.now().strftime('%d/%m/%Y à %H:%M')} (UTC)
-    </p>
-    """
-    return send_email(to, f'[{APP_NAME}] Votre code de connexion : {otp}', _base_template(contenu))
-
-
-def send_password_reset(to: str, token: str) -> bool:
-    reset_url = f"{APP_URL}/reset-password?token={token}"
-    contenu = f"""
-    <h2>Réinitialisation de votre mot de passe</h2>
-    <p>Vous avez demandé la réinitialisation de votre mot de passe Infinity Compliance.</p>
-    <p>Cliquez sur le bouton ci-dessous pour choisir un nouveau mot de passe :</p>
-
-    <div style="text-align:center; margin: 28px 0;">
-      <a href="{reset_url}" class="btn">Réinitialiser mon mot de passe</a>
-    </div>
-
-    <div class="warning">
-      ⚠️ Ce lien est valable <strong>1 heure</strong> et ne peut être utilisé qu'une seule fois.<br>
-      Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.
-    </div>
-
-    <p style="font-size:12px; color:#aaa; word-break:break-all;">
-      Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br>
-      {reset_url}
-    </p>
-    """
-    return send_email(to, f'[{APP_NAME}] Réinitialisation de votre mot de passe', _base_template(contenu))
-
-
-def send_welcome(to: str) -> bool:
-    contenu = f"""
-    <h2>Bienvenue sur Infinity Compliance !</h2>
-    <p>Votre compte a été créé avec succès. Vous pouvez maintenant :</p>
-    <ul>
-      <li>Remplir vos formulaires ARTCI en ligne</li>
-      <li>Bénéficier de l'assistance IA spécialisée sur la loi n°2013-450</li>
-      <li>Signer électroniquement vos dossiers</li>
-      <li>Suivre l'avancement de vos dossiers</li>
-    </ul>
-
-    <div style="text-align:center; margin: 28px 0;">
-      <a href="{APP_URL}" class="btn">Accéder à mon espace</a>
-    </div>
-
-    <p style="font-size:13px; color:#888;">
-      Nous vous recommandons d'activer la double authentification (A2F)
-      dans vos paramètres pour sécuriser votre compte.
-    </p>
-    """
-    return send_email(to, f'Bienvenue sur {APP_NAME} !', _base_template(contenu))
-
-
-def send_dossier_status(to: str, reference: str, statut: str) -> bool:
-    labels = {
-        'en_attente_signature':  ('En attente de signature',  'Votre dossier a été soumis. Veuillez le signer électroniquement pour continuer.'),
-        'en_attente_paiement':   ('En attente de paiement',   'Votre dossier a été signé. Procédez au paiement des frais pour le transmettre à l\'ARTCI.'),
-        'transmis':              ('Transmis à l\'ARTCI',       'Votre dossier a été transmis à l\'ARTCI. Délai de traitement : 1 mois.'),
-        'en_cours':              ('En cours d\'instruction',   'L\'ARTCI instruit votre dossier. Vous serez notifié de la décision.'),
-        'complet':               ('Récépissé délivré ✓',       'Félicitations ! Votre dossier a été accepté par l\'ARTCI. Votre récépissé est disponible.'),
-        'refuse':                ('Dossier refusé',            'Votre dossier a été refusé par l\'ARTCI. Vous pouvez introduire un recours dans les 30 jours.'),
-    }
-    label, message = labels.get(statut, ('Mise à jour', 'Le statut de votre dossier a été mis à jour.'))
-    contenu = f"""
-    <h2>Mise à jour de votre dossier</h2>
-    <p>Le statut de votre dossier <strong style="font-family:monospace">{reference}</strong> a été mis à jour.</p>
-
-    <div style="background:#f5f5f5; border-radius:8px; padding:16px; margin:20px 0;">
-      <div style="font-size:13px; color:#888; margin-bottom:4px;">Nouveau statut</div>
-      <div style="font-size:16px; font-weight:600; color:#111;">{label}</div>
-      <div style="font-size:13px; color:#555; margin-top:8px;">{message}</div>
-    </div>
-
-    <div style="text-align:center; margin:24px 0;">
-      <a href="{APP_URL}/suivi/{reference}" class="btn">Suivre mon dossier</a>
-    </div>
-    """
-    return send_email(to, f'[{APP_NAME}] Dossier {reference} — {label}', _base_template(contenu))
 
 
 def send_verification_inscription(to: str, code: str) -> bool:
@@ -196,8 +95,92 @@ def send_verification_inscription(to: str, code: str) -> bool:
       Heure d'envoi : {datetime.now().strftime('%d/%m/%Y à %H:%M')} (UTC)
     </p>
     """
-    return send_email(
-        to,
-        f'[{APP_NAME}] Confirmez votre email — Code : {code}',
-        _base_template(contenu)
-    )
+    return send_email(to, f'[{APP_NAME}] Confirmez votre email — Code : {code}', _base_template(contenu))
+
+
+def send_otp_a2f(to: str, otp: str) -> bool:
+    contenu = f"""
+    <h2>Code de vérification</h2>
+    <p>Vous tentez de vous connecter à votre espace Infinity Compliance.</p>
+
+    <div class="otp">
+      <div class="otp-code">{otp}</div>
+      <div class="otp-info">Ce code est valable <strong>10 minutes</strong></div>
+    </div>
+
+    <div class="warning">
+      ⚠️ Si vous n'êtes pas à l'origine de cette connexion, changez votre mot de passe immédiatement.
+    </div>
+
+    <p style="font-size:13px; color:#888;">
+      Heure d'envoi : {datetime.now().strftime('%d/%m/%Y à %H:%M')} (UTC)
+    </p>
+    """
+    return send_email(to, f'[{APP_NAME}] Votre code de connexion : {otp}', _base_template(contenu))
+
+
+def send_password_reset(to: str, token: str) -> bool:
+    reset_url = f"{APP_URL}/reset-password?token={token}"
+    contenu = f"""
+    <h2>Réinitialisation de votre mot de passe</h2>
+    <p>Vous avez demandé la réinitialisation de votre mot de passe Infinity Compliance.</p>
+
+    <div style="text-align:center; margin: 28px 0;">
+      <a href="{reset_url}" class="btn">Réinitialiser mon mot de passe</a>
+    </div>
+
+    <div class="warning">
+      ⚠️ Ce lien est valable <strong>1 heure</strong> et ne peut être utilisé qu'une seule fois.<br>
+      Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.
+    </div>
+
+    <p style="font-size:12px; color:#aaa; word-break:break-all;">
+      Si le bouton ne fonctionne pas, copiez ce lien :<br>{reset_url}
+    </p>
+    """
+    return send_email(to, f'[{APP_NAME}] Réinitialisation de votre mot de passe', _base_template(contenu))
+
+
+def send_welcome(to: str) -> bool:
+    contenu = f"""
+    <h2>Bienvenue sur Infinity Compliance !</h2>
+    <p>Votre compte a été activé avec succès. Vous pouvez maintenant :</p>
+    <ul>
+      <li>Remplir vos formulaires ARTCI en ligne</li>
+      <li>Bénéficier de l'assistance IA spécialisée sur la loi n°2013-450</li>
+      <li>Signer électroniquement vos dossiers</li>
+      <li>Suivre l'avancement de vos dossiers en temps réel</li>
+    </ul>
+
+    <div style="text-align:center; margin: 28px 0;">
+      <a href="{APP_URL}" class="btn">Accéder à mon espace</a>
+    </div>
+    """
+    return send_email(to, f'Bienvenue sur {APP_NAME} !', _base_template(contenu))
+
+
+def send_dossier_status(to: str, reference: str, statut: str) -> bool:
+    labels = {
+        'en_attente_signature': ('En attente de signature',  'Votre dossier est prêt. Signez-le électroniquement pour continuer.'),
+        'en_attente_paiement':  ('En attente de paiement',   "Votre dossier a été signé. Procédez au paiement pour le transmettre à l'ARTCI."),
+        'transmis':             ("Transmis à l'ARTCI",        "Votre dossier a été transmis à l'ARTCI. Délai de traitement : 1 mois."),
+        'en_cours':             ("En cours d'instruction",    "L'ARTCI instruit votre dossier."),
+        'complet':              ('Récépissé délivré ✓',       "Félicitations ! Votre dossier a été accepté par l'ARTCI."),
+        'refuse':               ('Dossier refusé',            "Votre dossier a été refusé. Vous pouvez introduire un recours dans les 30 jours."),
+    }
+    label, message = labels.get(statut, ('Mise à jour', 'Le statut de votre dossier a été mis à jour.'))
+    contenu = f"""
+    <h2>Mise à jour de votre dossier</h2>
+    <p>Le statut de votre dossier <strong style="font-family:monospace">{reference}</strong> a été mis à jour.</p>
+
+    <div style="background:#f5f5f5; border-radius:8px; padding:16px; margin:20px 0;">
+      <div style="font-size:13px; color:#888; margin-bottom:4px;">Nouveau statut</div>
+      <div style="font-size:16px; font-weight:600; color:#111;">{label}</div>
+      <div style="font-size:13px; color:#555; margin-top:8px;">{message}</div>
+    </div>
+
+    <div style="text-align:center; margin:24px 0;">
+      <a href="{APP_URL}/suivi/{reference}" class="btn">Suivre mon dossier</a>
+    </div>
+    """
+    return send_email(to, f'[{APP_NAME}] Dossier {reference} — {label}', _base_template(contenu))
