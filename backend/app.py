@@ -1,4 +1,4 @@
-import os, json, random, string
+import os, json, random, string, secrets
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -8,28 +8,36 @@ from flask_jwt_extended import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
-from models import db, Utilisateur, Entreprise, Dossier
-
 from pathlib import Path
+
 load_dotenv(Path(__file__).parent / '.env')
+
+from models import db, Utilisateur, Entreprise, Dossier
+from system_prompt import SYSTEM_IA
+from email_service import (
+    send_otp_a2f, send_password_reset,
+    send_welcome, send_dossier_status
+)
+
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI']      = 'sqlite:///artci.db'
+app.config['SQLALCHEMY_DATABASE_URI']       = os.getenv('DATABASE_URL', 'sqlite:///artci.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY']               = os.getenv('JWT_SECRET_KEY', 'dev-secret-key')
-app.config['JWT_ACCESS_TOKEN_EXPIRES']     = timedelta(hours=8)
+app.config['JWT_SECRET_KEY']                = os.getenv('JWT_SECRET_KEY', 'dev-secret-key')
+app.config['JWT_ACCESS_TOKEN_EXPIRES']      = timedelta(hours=8)
 
 CORS(app, origins=[
     'http://localhost:5173',
     'http://localhost:3000',
     'https://artci-frontend.onrender.com'
 ])
+
 db.init_app(app)
 jwt = JWTManager(app)
 
 with app.app_context():
     db.create_all()
 
-# ── Helpers ───────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────
 
 def code_otp():
     return ''.join(random.choices(string.digits, k=6))
@@ -40,25 +48,30 @@ def gen_reference():
     return f"IC-{annee}-{count:04d}"
 
 
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 # AUTH
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 
 @app.post('/api/auth/inscription')
 def inscription():
-    d   = request.json or {}
+    d     = request.json or {}
     email = (d.get('email') or '').strip().lower()
     mdp   = (d.get('mot_de_passe') or '').strip()
+
     if not email or not mdp:
         return jsonify({'erreur': 'Email et mot de passe requis'}), 400
+    if len(mdp) < 8:
+        return jsonify({'erreur': 'Le mot de passe doit contenir au moins 8 caractères'}), 400
     if Utilisateur.query.filter_by(email=email).first():
         return jsonify({'erreur': 'Cet email est déjà utilisé'}), 409
-    u = Utilisateur(
-        email=email,
-        mot_de_passe=generate_password_hash(mdp)
-    )
+
+    u = Utilisateur(email=email, mot_de_passe=generate_password_hash(mdp))
     db.session.add(u)
     db.session.commit()
+
+    # Email de bienvenue
+    send_welcome(email)
+
     token = create_access_token(identity=str(u.id))
     return jsonify({'token': token, 'profil_complet': False}), 201
 
@@ -69,19 +82,26 @@ def connexion():
     email = (d.get('email') or '').strip().lower()
     mdp   = (d.get('mot_de_passe') or '').strip()
     u     = Utilisateur.query.filter_by(email=email).first()
+
     if not u or not check_password_hash(u.mot_de_passe, mdp):
         return jsonify({'erreur': 'Email ou mot de passe incorrect'}), 401
+
     if u.a2f_active:
         otp = code_otp()
-        u.otp_temp = otp
+        u.otp_temp     = otp
+        u.otp_expire   = datetime.utcnow() + timedelta(minutes=10)
         db.session.commit()
-        # En production → envoyer par SMS
-        # En test → retourné dans la réponse
+
+        # Envoi OTP par email
+        envoye = send_otp_a2f(email, otp)
+
         return jsonify({
-            'a2f_requis':      True,
-            'utilisateur_id':  u.id,
-            'otp_code':        otp
+            'a2f_requis':     True,
+            'utilisateur_id': u.id,
+            'email_envoye':   envoye,
+            'email_hint':     email[:3] + '***' + email[email.find('@'):]
         })
+
     token = create_access_token(identity=str(u.id))
     return jsonify({
         'token':          token,
@@ -96,14 +116,48 @@ def verifier_otp():
     uid  = d.get('utilisateur_id')
     code = (d.get('code') or '').strip()
     u    = Utilisateur.query.get(uid)
+
     if not u:
         return jsonify({'erreur': 'Utilisateur introuvable'}), 404
+
+    # Vérifier expiration
+    if u.otp_expire and datetime.utcnow() > u.otp_expire:
+        u.otp_temp   = None
+        u.otp_expire = None
+        db.session.commit()
+        return jsonify({'erreur': 'Code expiré. Veuillez vous reconnecter pour recevoir un nouveau code.'}), 401
+
     if u.otp_temp != code:
         return jsonify({'erreur': 'Code incorrect'}), 401
-    u.otp_temp = None
+
+    u.otp_temp   = None
+    u.otp_expire = None
     db.session.commit()
+
     token = create_access_token(identity=str(u.id))
     return jsonify({'token': token, 'profil_complet': u.profil_complet})
+
+
+@app.post('/api/auth/renvoyer-otp')
+def renvoyer_otp():
+    d   = request.json or {}
+    uid = d.get('utilisateur_id')
+    u   = Utilisateur.query.get(uid)
+
+    if not u:
+        return jsonify({'erreur': 'Utilisateur introuvable'}), 404
+
+    otp = code_otp()
+    u.otp_temp   = otp
+    u.otp_expire = datetime.utcnow() + timedelta(minutes=10)
+    db.session.commit()
+
+    envoye = send_otp_a2f(u.email, otp)
+    return jsonify({
+        'message':      'Nouveau code envoyé',
+        'email_envoye': envoye,
+        'email_hint':   u.email[:3] + '***' + u.email[u.email.find('@'):]
+    })
 
 
 @app.post('/api/auth/activer-a2f')
@@ -115,7 +169,7 @@ def activer_a2f():
         return jsonify({'erreur': 'Introuvable'}), 404
     u.a2f_active = True
     db.session.commit()
-    return jsonify({'message': 'Double authentification activée'})
+    return jsonify({'message': 'Double authentification activée. Un code vous sera envoyé par email à chaque connexion.'})
 
 
 @app.post('/api/auth/desactiver-a2f')
@@ -127,7 +181,7 @@ def desactiver_a2f():
         return jsonify({'erreur': 'Introuvable'}), 404
     u.a2f_active = False
     db.session.commit()
-    return jsonify({'message': 'Double authentification désactivée'})
+    return jsonify({'message': 'Double authentification désactivée.'})
 
 
 @app.get('/api/auth/profil')
@@ -145,9 +199,81 @@ def get_profil():
     })
 
 
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+# PASSWORD RESET
+# ══════════════════════════════════════════════════════════════
+
+@app.post('/api/auth/mot-de-passe-oublie')
+def mot_de_passe_oublie():
+    d     = request.json or {}
+    email = (d.get('email') or '').strip().lower()
+
+    if not email:
+        return jsonify({'erreur': 'Email requis'}), 400
+
+    u = Utilisateur.query.filter_by(email=email).first()
+
+    # Toujours retourner succès même si email inexistant (sécurité anti-enumération)
+    if u:
+        token        = secrets.token_urlsafe(32)
+        u.reset_token        = token
+        u.reset_token_expire = datetime.utcnow() + timedelta(hours=1)
+        db.session.commit()
+        send_password_reset(email, token)
+
+    return jsonify({
+        'message': 'Si cet email existe dans notre système, vous recevrez un lien de réinitialisation dans quelques minutes.'
+    })
+
+
+@app.post('/api/auth/reinitialiser-mot-de-passe')
+def reinitialiser_mot_de_passe():
+    d     = request.json or {}
+    token = (d.get('token') or '').strip()
+    mdp   = (d.get('mot_de_passe') or '').strip()
+
+    if not token or not mdp:
+        return jsonify({'erreur': 'Token et mot de passe requis'}), 400
+    if len(mdp) < 8:
+        return jsonify({'erreur': 'Le mot de passe doit contenir au moins 8 caractères'}), 400
+
+    u = Utilisateur.query.filter_by(reset_token=token).first()
+
+    if not u:
+        return jsonify({'erreur': 'Lien invalide ou déjà utilisé'}), 400
+
+    if datetime.utcnow() > u.reset_token_expire:
+        u.reset_token        = None
+        u.reset_token_expire = None
+        db.session.commit()
+        return jsonify({'erreur': 'Lien expiré. Veuillez faire une nouvelle demande.'}), 400
+
+    u.mot_de_passe       = generate_password_hash(mdp)
+    u.reset_token        = None
+    u.reset_token_expire = None
+    db.session.commit()
+
+    return jsonify({'message': 'Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter.'})
+
+
+@app.get('/api/auth/verifier-token-reset')
+def verifier_token_reset():
+    token = request.args.get('token', '').strip()
+    if not token:
+        return jsonify({'valide': False, 'erreur': 'Token manquant'}), 400
+
+    u = Utilisateur.query.filter_by(reset_token=token).first()
+    if not u:
+        return jsonify({'valide': False, 'erreur': 'Lien invalide'}), 400
+    if datetime.utcnow() > u.reset_token_expire:
+        return jsonify({'valide': False, 'erreur': 'Lien expiré'}), 400
+
+    return jsonify({'valide': True, 'email': u.email[:3] + '***' + u.email[u.email.find('@'):]})
+
+
+# ══════════════════════════════════════════════════════════════
 # ENTREPRISE
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 
 @app.get('/api/entreprise')
 @jwt_required()
@@ -179,28 +305,20 @@ def sauvegarder_entreprise():
     if not e:
         e = Entreprise(utilisateur_id=uid)
         db.session.add(e)
-    champs = [
-        'denomination', 'forme_juridique', 'rccm', 'fiscal',
-        'siege', 'representant', 'fonction', 'telephone',
-        'email_droits', 'secteur'
-    ]
+    champs = ['denomination','forme_juridique','rccm','fiscal','siege','representant','fonction','telephone','email_droits','secteur']
     for c in champs:
         if c in d:
             setattr(e, c, d[c])
-    u = Utilisateur.query.get(uid)
-    requis = ['denomination', 'rccm', 'siege', 'representant', 'fonction', 'telephone', 'email_droits']
+    u      = Utilisateur.query.get(uid)
+    requis = ['denomination','rccm','siege','representant','fonction','telephone','email_droits']
     u.profil_complet = all(getattr(e, r) for r in requis)
     db.session.commit()
     return jsonify({'message': 'Profil sauvegardé', 'profil_complet': u.profil_complet})
 
 
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 # ASSISTANT IA
-# ═══════════════════════════════════════════════════════════════
-
-from system_prompt import SYSTEM_IA
-
-
+# ══════════════════════════════════════════════════════════════
 
 @app.post('/api/ia/valider-champ')
 @jwt_required()
@@ -216,21 +334,12 @@ def valider_champ():
         return jsonify({'type': 'info', 'message': 'Clé API non configurée.'})
 
     if mode == 'chat':
-        system = """Tu es un assistant DPO expert sur la Loi n°2013-450 de Côte d'Ivoire.
-        Tu aides les utilisateurs à remplir leurs formulaires ARTCI.
-        Tu connais le contexte du formulaire en cours (champs, étape, valeurs saisies).
-        Réponds en JSON : {"type":"info","message":"ta réponse complète et utile"}
-        Sois pédagogue, donne des exemples concrets adaptés à la CI.
-        Si on te demande d'expliquer un champ, donne: ce que c'est, où le trouver, un exemple."""
+        system = SYSTEM_IA + "\n\nMODE CHAT : Réponds en JSON {\"type\":\"info\",\"message\":\"ta réponse complète\"}. Sois pédagogue, donne des exemples concrets CI, utilise le markdown."
         prompt = f"Contexte du formulaire:\n{ctx}\n\nQuestion de l'utilisateur: {valeur}"
     else:
-        system = """Tu es l'assistant DPO d'Infinity Compliance, expert sur la Loi n°2013-450 de Côte d'Ivoire.
-                    Tu analyses les champs d'un formulaire ARTCI et fournis un feedback concis.
-                    Réponds UNIQUEMENT en JSON : {"type":"ok|warn|err|info","message":"ton message"}
-                    Sois bref (1-2 phrases max), pratique, en français professionnel."""
+        system = SYSTEM_IA + "\n\nMODE VALIDATION : Réponds UNIQUEMENT en JSON {\"type\":\"ok|warn|err|info\",\"message\":\"message court\"}. Maximum 2 phrases."
         prompt = f"Champ: {champ}\nValeur: {valeur}\nContexte: {ctx}\nAnalyse ce champ pour un formulaire ARTCI."
 
-    
     try:
         import anthropic
         client   = anthropic.Anthropic(api_key=api_key)
@@ -243,29 +352,21 @@ def valider_champ():
         text = response.content[0].text.strip()
         text = text.replace('```json', '').replace('```', '').strip()
         try:
-            result = json.loads(text)
-            return jsonify(result)
+            return jsonify(json.loads(text))
         except json.JSONDecodeError:
-            # Extraire type et message manuellement
             import re
             type_match = re.search(r'"type"\s*:\s*"(\w+)"', text)
-            # Extraire tout ce qui suit "message": " jusqu'à la fin
-            msg_match = re.search(r'"message"\s*:\s*"([\s\S]*)', text)
+            msg_match  = re.search(r'"message"\s*:\s*"([\s\S]*)', text)
             if msg_match:
                 message = msg_match.group(1)
-                # Supprimer le dernier " } si présent
                 message = re.sub(r'"\s*}?\s*$', '', message)
-                # Nettoyer les guillemets échappés
                 message = message.replace('\\"', '"')
-                return jsonify({
-                    'type': type_match.group(1) if type_match else 'info',
-                    'message': message
-                })
+                return jsonify({'type': type_match.group(1) if type_match else 'info', 'message': message})
             return jsonify({'type': 'info', 'message': text[:1000]})
     except Exception as e:
         return jsonify({'type': 'info', 'message': f'IA indisponible: {str(e)[:60]}'})
-    
-    
+
+
 @app.post('/api/ia/valider-formulaire')
 @jwt_required()
 def valider_formulaire():
@@ -274,11 +375,7 @@ def valider_formulaire():
     api_key = os.getenv('ANTHROPIC_API_KEY', '')
     if not api_key:
         return jsonify({'checks': [{'type': 'info', 'message': 'Clé API non configurée.'}]})
-    prompt = (
-        f"Voici un formulaire ARTCI complet:\n{json.dumps(donnees, ensure_ascii=False, indent=2)}\n\n"
-        f"Fais une vérification globale. Réponds en JSON: "
-        f'{{\"checks\":[{{\"type\":\"ok|warn|err\",\"message\":\"...\"}}]}} — max 4 vérifications.'
-    )
+    prompt = f"Voici un formulaire ARTCI complet:\n{json.dumps(donnees, ensure_ascii=False, indent=2)}\n\nFais une vérification globale. Réponds en JSON: {{\"checks\":[{{\"type\":\"ok|warn|err\",\"message\":\"...\"}}]}} — max 4 vérifications."
     try:
         import anthropic
         client   = anthropic.Anthropic(api_key=api_key)
@@ -289,14 +386,14 @@ def valider_formulaire():
             messages=[{'role': 'user', 'content': prompt}]
         )
         text = response.content[0].text.strip()
-        return jsonify(json.loads(text.replace('```json', '').replace('```', '').strip()))
+        return jsonify(json.loads(text.replace('```json','').replace('```','').strip()))
     except Exception as e:
         return jsonify({'checks': [{'type': 'err', 'message': str(e)[:100]}]})
 
 
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 # DOSSIERS
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 
 @app.get('/api/dossiers')
 @jwt_required()
@@ -359,15 +456,21 @@ def maj_dossier(dos_id):
     if 'donnees' in d:
         dos.donnees = json.dumps(d['donnees'])
     if 'statut' in d:
-        dos.statut = d['statut']
+        ancien_statut = dos.statut
+        dos.statut    = d['statut']
+        # Notification email si changement de statut
+        if ancien_statut != dos.statut:
+            u = Utilisateur.query.get(uid)
+            if u:
+                send_dossier_status(u.email, dos.reference, dos.statut)
     dos.mis_a_jour_le = datetime.utcnow()
     db.session.commit()
     return jsonify({'message': 'Dossier mis à jour'})
 
 
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 # SIGNATURE OTP
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 
 @app.post('/api/signature/envoyer-otp')
 @jwt_required()
@@ -378,14 +481,20 @@ def envoyer_otp_signature():
     dos    = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
     if not dos:
         return jsonify({'erreur': 'Dossier introuvable'}), 404
+    u   = Utilisateur.query.get(uid)
     otp = code_otp()
     dos.otp_signature = otp
     db.session.commit()
-    # En production → envoyer par SMS via Orange CI API
+
+    # Envoi OTP signature par email
+    envoye = send_otp_a2f(u.email, otp)
+
     return jsonify({
-        'message':   'Code OTP généré',
-        'otp_code':  otp,   # retirer en production
-        'telephone': '*** (simulé en test)'
+        'message':     'Code OTP envoyé par email',
+        'email_hint':  u.email[:3] + '***' + u.email[u.email.find('@'):],
+        'email_envoye': envoye,
+        # En mode test uniquement — retirer en prod
+        'otp_code':    otp
     })
 
 
@@ -404,13 +513,20 @@ def confirmer_signature():
     dos.otp_signature = None
     dos.statut        = 'en_attente_paiement'
     dos.signe_le      = datetime.utcnow()
+    dos.mis_a_jour_le = datetime.utcnow()
     db.session.commit()
+
+    # Notification email
+    u = Utilisateur.query.get(uid)
+    if u:
+        send_dossier_status(u.email, dos.reference, 'en_attente_paiement')
+
     return jsonify({'message': 'Signature confirmée', 'statut': dos.statut})
 
 
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 # SUIVI PUBLIC
-# ═══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 
 @app.get('/api/suivi/<reference>')
 def suivi_public(reference):
@@ -418,6 +534,7 @@ def suivi_public(reference):
     if not dos:
         return jsonify({'erreur': 'Référence introuvable'}), 404
     return jsonify({
+        'id':              dos.id,
         'reference':       dos.reference,
         'type_formulaire': dos.type_formulaire,
         'statut':          dos.statut,
