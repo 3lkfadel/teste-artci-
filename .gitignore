@@ -17,3 +17,5 @@ frontend/dist/
 
 instance/
 *.db
+backend/instance/
+*.db
