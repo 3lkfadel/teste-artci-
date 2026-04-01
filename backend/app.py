@@ -15,15 +15,18 @@ load_dotenv(Path(__file__).parent / '.env')
 from models import db, Utilisateur, Entreprise, Dossier
 from system_prompt import SYSTEM_IA
 from email_service import (
-    send_otp_a2f, send_password_reset,
-    send_welcome, send_dossier_status
+    send_verification_inscription,
+    send_otp_a2f,
+    send_password_reset,
+    send_welcome,
+    send_dossier_status
 )
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI']       = os.getenv('DATABASE_URL', 'sqlite:///artci.db')
+app.config['SQLALCHEMY_DATABASE_URI']        = os.getenv('DATABASE_URL', 'sqlite:///artci.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY']                = os.getenv('JWT_SECRET_KEY', 'dev-secret-key')
-app.config['JWT_ACCESS_TOKEN_EXPIRES']      = timedelta(hours=8)
+app.config['JWT_SECRET_KEY']                 = os.getenv('JWT_SECRET_KEY', 'dev-secret-key')
+app.config['JWT_ACCESS_TOKEN_EXPIRES']       = timedelta(hours=8)
 
 CORS(app, origins=[
     'http://localhost:5173',
@@ -37,7 +40,7 @@ jwt = JWTManager(app)
 with app.app_context():
     db.create_all()
 
-# ── Helpers ────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────
 
 def code_otp():
     return ''.join(random.choices(string.digits, k=6))
@@ -48,9 +51,9 @@ def gen_reference():
     return f"IC-{annee}-{count:04d}"
 
 
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 # AUTH
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 
 @app.post('/api/auth/inscription')
 def inscription():
@@ -65,15 +68,89 @@ def inscription():
     if Utilisateur.query.filter_by(email=email).first():
         return jsonify({'erreur': 'Cet email est déjà utilisé'}), 409
 
-    u = Utilisateur(email=email, mot_de_passe=generate_password_hash(mdp))
+    # Créer compte NON activé
+    code = code_otp()
+    u = Utilisateur(
+        email               = email,
+        mot_de_passe        = generate_password_hash(mdp),
+        email_verifie       = False,
+        verification_code   = code,
+        verification_expire = datetime.utcnow() + timedelta(minutes=15),
+    )
     db.session.add(u)
     db.session.commit()
 
+    # Envoyer code de vérification
+    envoye = send_verification_inscription(email, code)
+
+    return jsonify({
+        'message':        'Compte créé. Vérifiez votre email pour activer votre compte.',
+        'utilisateur_id': u.id,
+        'email_hint':     email[:3] + '***' + email[email.find('@'):],
+        'email_envoye':   envoye,
+        # Mode test uniquement — retirer en prod
+        'code_test':      code
+    }), 201
+
+
+@app.post('/api/auth/verifier-email')
+def verifier_email():
+    d    = request.json or {}
+    uid  = d.get('utilisateur_id')
+    code = (d.get('code') or '').strip()
+    u    = Utilisateur.query.get(uid)
+
+    if not u:
+        return jsonify({'erreur': 'Utilisateur introuvable'}), 404
+
+    if u.email_verifie:
+        return jsonify({'erreur': 'Email déjà vérifié'}), 400
+
+    if datetime.utcnow() > u.verification_expire:
+        return jsonify({'erreur': 'Code expiré. Cliquez sur "Renvoyer le code".'}), 401
+
+    if u.verification_code != code:
+        return jsonify({'erreur': 'Code incorrect'}), 401
+
+    # Activer le compte
+    u.email_verifie      = True
+    u.verification_code  = None
+    u.verification_expire = None
+    db.session.commit()
+
     # Email de bienvenue
-    send_welcome(email)
+    send_welcome(u.email)
 
     token = create_access_token(identity=str(u.id))
-    return jsonify({'token': token, 'profil_complet': False}), 201
+    return jsonify({
+        'token':          token,
+        'profil_complet': u.profil_complet,
+        'message':        'Email vérifié ! Bienvenue sur Infinity Compliance.'
+    })
+
+
+@app.post('/api/auth/renvoyer-verification')
+def renvoyer_verification():
+    d   = request.json or {}
+    uid = d.get('utilisateur_id')
+    u   = Utilisateur.query.get(uid)
+
+    if not u:
+        return jsonify({'erreur': 'Utilisateur introuvable'}), 404
+    if u.email_verifie:
+        return jsonify({'erreur': 'Email déjà vérifié'}), 400
+
+    code = code_otp()
+    u.verification_code   = code
+    u.verification_expire = datetime.utcnow() + timedelta(minutes=15)
+    db.session.commit()
+
+    envoye = send_verification_inscription(u.email, code)
+    return jsonify({
+        'message':      'Nouveau code envoyé.',
+        'email_envoye': envoye,
+        'code_test':    code
+    })
 
 
 @app.post('/api/auth/connexion')
@@ -86,20 +163,35 @@ def connexion():
     if not u or not check_password_hash(u.mot_de_passe, mdp):
         return jsonify({'erreur': 'Email ou mot de passe incorrect'}), 401
 
+    # Vérifier si email confirmé
+    if not u.email_verifie:
+        # Renvoyer un nouveau code
+        code = code_otp()
+        u.verification_code   = code
+        u.verification_expire = datetime.utcnow() + timedelta(minutes=15)
+        db.session.commit()
+        send_verification_inscription(email, code)
+        return jsonify({
+            'erreur':         'Email non vérifié. Un nouveau code vous a été envoyé.',
+            'email_non_verifie': True,
+            'utilisateur_id': u.id,
+            'email_hint':     email[:3] + '***' + email[email.find('@'):],
+            'code_test':      code
+        }), 403
+
+    # A2F optionnelle
     if u.a2f_active:
         otp = code_otp()
-        u.otp_temp     = otp
-        u.otp_expire   = datetime.utcnow() + timedelta(minutes=10)
+        u.otp_temp   = otp
+        u.otp_expire = datetime.utcnow() + timedelta(minutes=10)
         db.session.commit()
-
-        # Envoi OTP par email
         envoye = send_otp_a2f(email, otp)
-
         return jsonify({
             'a2f_requis':     True,
             'utilisateur_id': u.id,
+            'email_hint':     email[:3] + '***' + email[email.find('@'):],
             'email_envoye':   envoye,
-            'email_hint':     email[:3] + '***' + email[email.find('@'):]
+            'otp_test':       otp
         })
 
     token = create_access_token(identity=str(u.id))
@@ -120,18 +212,15 @@ def verifier_otp():
     if not u:
         return jsonify({'erreur': 'Utilisateur introuvable'}), 404
 
-    # Vérifier expiration
     if u.otp_expire and datetime.utcnow() > u.otp_expire:
-        u.otp_temp   = None
-        u.otp_expire = None
+        u.otp_temp = None; u.otp_expire = None
         db.session.commit()
-        return jsonify({'erreur': 'Code expiré. Veuillez vous reconnecter pour recevoir un nouveau code.'}), 401
+        return jsonify({'erreur': 'Code expiré. Reconnectez-vous pour recevoir un nouveau code.'}), 401
 
     if u.otp_temp != code:
         return jsonify({'erreur': 'Code incorrect'}), 401
 
-    u.otp_temp   = None
-    u.otp_expire = None
+    u.otp_temp = None; u.otp_expire = None
     db.session.commit()
 
     token = create_access_token(identity=str(u.id))
@@ -154,9 +243,9 @@ def renvoyer_otp():
 
     envoye = send_otp_a2f(u.email, otp)
     return jsonify({
-        'message':      'Nouveau code envoyé',
+        'message':      'Nouveau code envoyé.',
         'email_envoye': envoye,
-        'email_hint':   u.email[:3] + '***' + u.email[u.email.find('@'):]
+        'otp_test':     otp
     })
 
 
@@ -165,11 +254,10 @@ def renvoyer_otp():
 def activer_a2f():
     uid = get_jwt_identity()
     u   = Utilisateur.query.get(uid)
-    if not u:
-        return jsonify({'erreur': 'Introuvable'}), 404
+    if not u: return jsonify({'erreur': 'Introuvable'}), 404
     u.a2f_active = True
     db.session.commit()
-    return jsonify({'message': 'Double authentification activée. Un code vous sera envoyé par email à chaque connexion.'})
+    return jsonify({'message': 'Double authentification activée.'})
 
 
 @app.post('/api/auth/desactiver-a2f')
@@ -177,8 +265,7 @@ def activer_a2f():
 def desactiver_a2f():
     uid = get_jwt_identity()
     u   = Utilisateur.query.get(uid)
-    if not u:
-        return jsonify({'erreur': 'Introuvable'}), 404
+    if not u: return jsonify({'erreur': 'Introuvable'}), 404
     u.a2f_active = False
     db.session.commit()
     return jsonify({'message': 'Double authentification désactivée.'})
@@ -189,41 +276,36 @@ def desactiver_a2f():
 def get_profil():
     uid = get_jwt_identity()
     u   = Utilisateur.query.get(uid)
-    if not u:
-        return jsonify({'erreur': 'Introuvable'}), 404
+    if not u: return jsonify({'erreur': 'Introuvable'}), 404
     return jsonify({
         'id':             u.id,
         'email':          u.email,
         'a2f_active':     u.a2f_active,
+        'email_verifie':  u.email_verifie,
         'profil_complet': u.profil_complet
     })
 
 
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 # PASSWORD RESET
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 
 @app.post('/api/auth/mot-de-passe-oublie')
 def mot_de_passe_oublie():
     d     = request.json or {}
     email = (d.get('email') or '').strip().lower()
-
     if not email:
         return jsonify({'erreur': 'Email requis'}), 400
 
     u = Utilisateur.query.filter_by(email=email).first()
-
-    # Toujours retourner succès même si email inexistant (sécurité anti-enumération)
     if u:
-        token        = secrets.token_urlsafe(32)
+        token = secrets.token_urlsafe(32)
         u.reset_token        = token
         u.reset_token_expire = datetime.utcnow() + timedelta(hours=1)
         db.session.commit()
         send_password_reset(email, token)
 
-    return jsonify({
-        'message': 'Si cet email existe dans notre système, vous recevrez un lien de réinitialisation dans quelques minutes.'
-    })
+    return jsonify({'message': 'Si cet email existe, vous recevrez un lien de réinitialisation.'})
 
 
 @app.post('/api/auth/reinitialiser-mot-de-passe')
@@ -238,22 +320,18 @@ def reinitialiser_mot_de_passe():
         return jsonify({'erreur': 'Le mot de passe doit contenir au moins 8 caractères'}), 400
 
     u = Utilisateur.query.filter_by(reset_token=token).first()
-
     if not u:
         return jsonify({'erreur': 'Lien invalide ou déjà utilisé'}), 400
-
     if datetime.utcnow() > u.reset_token_expire:
-        u.reset_token        = None
-        u.reset_token_expire = None
+        u.reset_token = None; u.reset_token_expire = None
         db.session.commit()
-        return jsonify({'erreur': 'Lien expiré. Veuillez faire une nouvelle demande.'}), 400
+        return jsonify({'erreur': 'Lien expiré. Faites une nouvelle demande.'}), 400
 
     u.mot_de_passe       = generate_password_hash(mdp)
     u.reset_token        = None
     u.reset_token_expire = None
     db.session.commit()
-
-    return jsonify({'message': 'Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter.'})
+    return jsonify({'message': 'Mot de passe réinitialisé. Vous pouvez vous connecter.'})
 
 
 @app.get('/api/auth/verifier-token-reset')
@@ -261,38 +339,29 @@ def verifier_token_reset():
     token = request.args.get('token', '').strip()
     if not token:
         return jsonify({'valide': False, 'erreur': 'Token manquant'}), 400
-
     u = Utilisateur.query.filter_by(reset_token=token).first()
     if not u:
         return jsonify({'valide': False, 'erreur': 'Lien invalide'}), 400
     if datetime.utcnow() > u.reset_token_expire:
         return jsonify({'valide': False, 'erreur': 'Lien expiré'}), 400
-
     return jsonify({'valide': True, 'email': u.email[:3] + '***' + u.email[u.email.find('@'):]})
 
 
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 # ENTREPRISE
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 
 @app.get('/api/entreprise')
 @jwt_required()
 def get_entreprise():
     uid = get_jwt_identity()
     e   = Entreprise.query.filter_by(utilisateur_id=uid).first()
-    if not e:
-        return jsonify(None)
+    if not e: return jsonify(None)
     return jsonify({
-        'denomination':    e.denomination,
-        'forme_juridique': e.forme_juridique,
-        'rccm':            e.rccm,
-        'fiscal':          e.fiscal,
-        'siege':           e.siege,
-        'representant':    e.representant,
-        'fonction':        e.fonction,
-        'telephone':       e.telephone,
-        'email_droits':    e.email_droits,
-        'secteur':         e.secteur
+        'denomination': e.denomination, 'forme_juridique': e.forme_juridique,
+        'rccm': e.rccm, 'fiscal': e.fiscal, 'siege': e.siege,
+        'representant': e.representant, 'fonction': e.fonction,
+        'telephone': e.telephone, 'email_droits': e.email_droits, 'secteur': e.secteur
     })
 
 
@@ -305,20 +374,20 @@ def sauvegarder_entreprise():
     if not e:
         e = Entreprise(utilisateur_id=uid)
         db.session.add(e)
-    champs = ['denomination','forme_juridique','rccm','fiscal','siege','representant','fonction','telephone','email_droits','secteur']
+    champs = ['denomination','forme_juridique','rccm','fiscal','siege',
+              'representant','fonction','telephone','email_droits','secteur']
     for c in champs:
-        if c in d:
-            setattr(e, c, d[c])
-    u      = Utilisateur.query.get(uid)
+        if c in d: setattr(e, c, d[c])
+    u = Utilisateur.query.get(uid)
     requis = ['denomination','rccm','siege','representant','fonction','telephone','email_droits']
     u.profil_complet = all(getattr(e, r) for r in requis)
     db.session.commit()
     return jsonify({'message': 'Profil sauvegardé', 'profil_complet': u.profil_complet})
 
 
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 # ASSISTANT IA
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 
 @app.post('/api/ia/valider-champ')
 @jwt_required()
@@ -334,11 +403,11 @@ def valider_champ():
         return jsonify({'type': 'info', 'message': 'Clé API non configurée.'})
 
     if mode == 'chat':
-        system = SYSTEM_IA + "\n\nMODE CHAT : Réponds en JSON {\"type\":\"info\",\"message\":\"ta réponse complète\"}. Sois pédagogue, donne des exemples concrets CI, utilise le markdown."
-        prompt = f"Contexte du formulaire:\n{ctx}\n\nQuestion de l'utilisateur: {valeur}"
+        system = SYSTEM_IA + "\n\nMODE CHAT : Réponds en JSON {\"type\":\"info\",\"message\":\"ta réponse\"} avec markdown."
+        prompt = f"Contexte:\n{ctx}\n\nQuestion: {valeur}"
     else:
-        system = SYSTEM_IA + "\n\nMODE VALIDATION : Réponds UNIQUEMENT en JSON {\"type\":\"ok|warn|err|info\",\"message\":\"message court\"}. Maximum 2 phrases."
-        prompt = f"Champ: {champ}\nValeur: {valeur}\nContexte: {ctx}\nAnalyse ce champ pour un formulaire ARTCI."
+        system = SYSTEM_IA + "\n\nMODE VALIDATION : JSON {\"type\":\"ok|warn|err|info\",\"message\":\"court\"}. Max 2 phrases."
+        prompt = f"Champ: {champ}\nValeur: {valeur}\nContexte: {ctx}"
 
     try:
         import anthropic
@@ -358,9 +427,7 @@ def valider_champ():
             type_match = re.search(r'"type"\s*:\s*"(\w+)"', text)
             msg_match  = re.search(r'"message"\s*:\s*"([\s\S]*)', text)
             if msg_match:
-                message = msg_match.group(1)
-                message = re.sub(r'"\s*}?\s*$', '', message)
-                message = message.replace('\\"', '"')
+                message = re.sub(r'"\s*}?\s*$', '', msg_match.group(1)).replace('\\"', '"')
                 return jsonify({'type': type_match.group(1) if type_match else 'info', 'message': message})
             return jsonify({'type': 'info', 'message': text[:1000]})
     except Exception as e:
@@ -375,13 +442,12 @@ def valider_formulaire():
     api_key = os.getenv('ANTHROPIC_API_KEY', '')
     if not api_key:
         return jsonify({'checks': [{'type': 'info', 'message': 'Clé API non configurée.'}]})
-    prompt = f"Voici un formulaire ARTCI complet:\n{json.dumps(donnees, ensure_ascii=False, indent=2)}\n\nFais une vérification globale. Réponds en JSON: {{\"checks\":[{{\"type\":\"ok|warn|err\",\"message\":\"...\"}}]}} — max 4 vérifications."
+    prompt = f"Formulaire ARTCI:\n{json.dumps(donnees, ensure_ascii=False, indent=2)}\n\nVérification globale. JSON: {{\"checks\":[{{\"type\":\"ok|warn|err\",\"message\":\"...\"}}]}} max 4."
     try:
         import anthropic
         client   = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model='claude-sonnet-4-6',
-            max_tokens=400,
+            model='claude-sonnet-4-6', max_tokens=400,
             system=SYSTEM_IA,
             messages=[{'role': 'user', 'content': prompt}]
         )
@@ -391,9 +457,9 @@ def valider_formulaire():
         return jsonify({'checks': [{'type': 'err', 'message': str(e)[:100]}]})
 
 
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 # DOSSIERS
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 
 @app.get('/api/dossiers')
 @jwt_required()
@@ -401,12 +467,10 @@ def lister_dossiers():
     uid      = get_jwt_identity()
     dossiers = Dossier.query.filter_by(utilisateur_id=uid).order_by(Dossier.cree_le.desc()).all()
     return jsonify([{
-        'id':              d.id,
-        'reference':       d.reference,
-        'type_formulaire': d.type_formulaire,
-        'statut':          d.statut,
-        'cree_le':         d.cree_le.isoformat() if d.cree_le else None,
-        'mis_a_jour_le':   d.mis_a_jour_le.isoformat() if d.mis_a_jour_le else None,
+        'id': d.id, 'reference': d.reference,
+        'type_formulaire': d.type_formulaire, 'statut': d.statut,
+        'cree_le': d.cree_le.isoformat() if d.cree_le else None,
+        'mis_a_jour_le': d.mis_a_jour_le.isoformat() if d.mis_a_jour_le else None,
     } for d in dossiers])
 
 
@@ -432,16 +496,13 @@ def creer_dossier():
 def get_dossier(dos_id):
     uid = get_jwt_identity()
     dos = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
-    if not dos:
-        return jsonify({'erreur': 'Dossier introuvable'}), 404
+    if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
     return jsonify({
-        'id':              dos.id,
-        'reference':       dos.reference,
-        'type_formulaire': dos.type_formulaire,
-        'statut':          dos.statut,
-        'donnees':         json.loads(dos.donnees or '{}'),
-        'cree_le':         dos.cree_le.isoformat() if dos.cree_le else None,
-        'signe_le':        dos.signe_le.isoformat() if dos.signe_le else None,
+        'id': dos.id, 'reference': dos.reference,
+        'type_formulaire': dos.type_formulaire, 'statut': dos.statut,
+        'donnees': json.loads(dos.donnees or '{}'),
+        'cree_le': dos.cree_le.isoformat() if dos.cree_le else None,
+        'signe_le': dos.signe_le.isoformat() if dos.signe_le else None,
     })
 
 
@@ -450,27 +511,24 @@ def get_dossier(dos_id):
 def maj_dossier(dos_id):
     uid = get_jwt_identity()
     dos = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
-    if not dos:
-        return jsonify({'erreur': 'Dossier introuvable'}), 404
+    if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
     d = request.json or {}
     if 'donnees' in d:
         dos.donnees = json.dumps(d['donnees'])
     if 'statut' in d:
-        ancien_statut = dos.statut
-        dos.statut    = d['statut']
-        # Notification email si changement de statut
-        if ancien_statut != dos.statut:
+        ancien = dos.statut
+        dos.statut = d['statut']
+        if ancien != dos.statut:
             u = Utilisateur.query.get(uid)
-            if u:
-                send_dossier_status(u.email, dos.reference, dos.statut)
+            if u: send_dossier_status(u.email, dos.reference, dos.statut)
     dos.mis_a_jour_le = datetime.utcnow()
     db.session.commit()
     return jsonify({'message': 'Dossier mis à jour'})
 
 
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 # SIGNATURE OTP
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 
 @app.post('/api/signature/envoyer-otp')
 @jwt_required()
@@ -479,22 +537,20 @@ def envoyer_otp_signature():
     d      = request.json or {}
     dos_id = d.get('dossier_id')
     dos    = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
-    if not dos:
-        return jsonify({'erreur': 'Dossier introuvable'}), 404
+    if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
+
     u   = Utilisateur.query.get(uid)
     otp = code_otp()
     dos.otp_signature = otp
     db.session.commit()
 
-    # Envoi OTP signature par email
     envoye = send_otp_a2f(u.email, otp)
 
     return jsonify({
-        'message':     'Code OTP envoyé par email',
-        'email_hint':  u.email[:3] + '***' + u.email[u.email.find('@'):],
+        'message':      'Code OTP envoyé par email',
+        'email_hint':   u.email[:3] + '***' + u.email[u.email.find('@'):],
         'email_envoye': envoye,
-        # En mode test uniquement — retirer en prod
-        'otp_code':    otp
+        'otp_code':     otp   # retirer en prod
     })
 
 
@@ -506,40 +562,35 @@ def confirmer_signature():
     dos_id = d.get('dossier_id')
     code   = (d.get('code') or '').strip()
     dos    = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
-    if not dos:
-        return jsonify({'erreur': 'Dossier introuvable'}), 404
+    if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
     if dos.otp_signature != code:
         return jsonify({'erreur': 'Code OTP incorrect'}), 401
+
     dos.otp_signature = None
     dos.statut        = 'en_attente_paiement'
     dos.signe_le      = datetime.utcnow()
     dos.mis_a_jour_le = datetime.utcnow()
     db.session.commit()
 
-    # Notification email
     u = Utilisateur.query.get(uid)
-    if u:
-        send_dossier_status(u.email, dos.reference, 'en_attente_paiement')
+    if u: send_dossier_status(u.email, dos.reference, 'en_attente_paiement')
 
     return jsonify({'message': 'Signature confirmée', 'statut': dos.statut})
 
 
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 # SUIVI PUBLIC
-# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
 
 @app.get('/api/suivi/<reference>')
 def suivi_public(reference):
     dos = Dossier.query.filter_by(reference=reference).first()
-    if not dos:
-        return jsonify({'erreur': 'Référence introuvable'}), 404
+    if not dos: return jsonify({'erreur': 'Référence introuvable'}), 404
     return jsonify({
-        'id':              dos.id,
-        'reference':       dos.reference,
-        'type_formulaire': dos.type_formulaire,
-        'statut':          dos.statut,
-        'cree_le':         dos.cree_le.isoformat() if dos.cree_le else None,
-        'signe_le':        dos.signe_le.isoformat() if dos.signe_le else None,
+        'id': dos.id, 'reference': dos.reference,
+        'type_formulaire': dos.type_formulaire, 'statut': dos.statut,
+        'cree_le': dos.cree_le.isoformat() if dos.cree_le else None,
+        'signe_le': dos.signe_le.isoformat() if dos.signe_le else None,
     })
 
 

@@ -19,18 +19,20 @@ async function req(path, options = {}) {
 }
 
 // ── Auth ────────────────────────────────────────────────────
-export const inscription       = (d) => req('/auth/inscription',    { method: 'POST', body: JSON.stringify(d) })
-export const connexion         = (d) => req('/auth/connexion',      { method: 'POST', body: JSON.stringify(d) })
-export const verifierOtp       = (d) => req('/auth/verifier-otp',   { method: 'POST', body: JSON.stringify(d) })
-export const renvoyerOtp       = (d) => req('/auth/renvoyer-otp',   { method: 'POST', body: JSON.stringify(d) })
-export const activerA2f        = ()  => req('/auth/activer-a2f',    { method: 'POST' })
-export const desactiverA2f     = ()  => req('/auth/desactiver-a2f', { method: 'POST' })
-export const getProfil         = ()  => req('/auth/profil')
+export const inscription            = (d) => req('/auth/inscription',              { method: 'POST', body: JSON.stringify(d) })
+export const verifierEmail          = (d) => req('/auth/verifier-email',            { method: 'POST', body: JSON.stringify(d) })
+export const renvoyerVerification   = (d) => req('/auth/renvoyer-verification',    { method: 'POST', body: JSON.stringify(d) })
+export const connexion              = (d) => req('/auth/connexion',                 { method: 'POST', body: JSON.stringify(d) })
+export const verifierOtp            = (d) => req('/auth/verifier-otp',              { method: 'POST', body: JSON.stringify(d) })
+export const renvoyerOtp            = (d) => req('/auth/renvoyer-otp',              { method: 'POST', body: JSON.stringify(d) })
+export const activerA2f             = ()  => req('/auth/activer-a2f',               { method: 'POST' })
+export const desactiverA2f          = ()  => req('/auth/desactiver-a2f',            { method: 'POST' })
+export const getProfil              = ()  => req('/auth/profil')
 
 // ── Password reset ──────────────────────────────────────────
-export const motDePasseOublie      = (d) => req('/auth/mot-de-passe-oublie',       { method: 'POST', body: JSON.stringify(d) })
-export const reinitialiserMotDePasse = (d) => req('/auth/reinitialiser-mot-de-passe', { method: 'POST', body: JSON.stringify(d) })
-export const verifierTokenReset    = (token) => req(`/auth/verifier-token-reset?token=${token}`)
+export const motDePasseOublie         = (d)     => req('/auth/mot-de-passe-oublie',        { method: 'POST', body: JSON.stringify(d) })
+export const reinitialiserMotDePasse  = (d)     => req('/auth/reinitialiser-mot-de-passe', { method: 'POST', body: JSON.stringify(d) })
+export const verifierTokenReset       = (token) => req(`/auth/verifier-token-reset?token=${token}`)
 
 // ── Entreprise ──────────────────────────────────────────────
 export const getEntreprise         = ()  => req('/entreprise')
