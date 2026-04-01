@@ -4,6 +4,7 @@ function getToken() {
   return localStorage.getItem('token')
 }
 
+
 async function req(path, options = {}) {
   const token = getToken()
   const res = await fetch(`${BASE}${path}`, {
@@ -16,6 +17,12 @@ async function req(path, options = {}) {
   const data = await res.json()
   if (!res.ok) throw new Error(data.erreur || `Erreur ${res.status}`)
   return data
+}
+
+// Détecter session expirée
+const params = new URLSearchParams(window.location.search)
+if (params.get('session') === 'expiree') {
+  // sera affiché dans le state err
 }
 
 // ── Auth ────────────────────────────────────────────────────

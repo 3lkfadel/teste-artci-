@@ -15,7 +15,11 @@ export default function Auth() {
   const [userId, setUserId]         = useState(null)
   const [emailHint, setEmailHint]   = useState('')
   const [loading, setLoading]       = useState(false)
-  const [err, setErr]               = useState('')
+  const [err, setErr]               = useState(
+    params.get('session') === 'expiree'
+      ? 'Votre session a expiré. Veuillez vous reconnecter.'
+      : ''
+  )
   const [ok, setOk]                 = useState('')
 
   function reset() { setErr(''); setOk('') }
