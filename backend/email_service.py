@@ -175,3 +175,29 @@ def send_dossier_status(to: str, reference: str, statut: str) -> bool:
     </div>
     """
     return send_email(to, f'[{APP_NAME}] Dossier {reference} — {label}', _base_template(contenu))
+
+
+def send_verification_inscription(to: str, code: str) -> bool:
+    contenu = f"""
+    <h2>Confirmez votre adresse email</h2>
+    <p>Bienvenue sur Infinity Compliance !<br>
+    Pour activer votre compte, saisissez le code ci-dessous :</p>
+
+    <div class="otp">
+      <div class="otp-code">{code}</div>
+      <div class="otp-info">Ce code est valable <strong>15 minutes</strong></div>
+    </div>
+
+    <div class="warning">
+      ⚠️ Si vous n'avez pas créé de compte sur Infinity Compliance, ignorez cet email.
+    </div>
+
+    <p style="font-size:13px; color:#888;">
+      Heure d'envoi : {datetime.now().strftime('%d/%m/%Y à %H:%M')} (UTC)
+    </p>
+    """
+    return send_email(
+        to,
+        f'[{APP_NAME}] Confirmez votre email — Code : {code}',
+        _base_template(contenu)
+    )
