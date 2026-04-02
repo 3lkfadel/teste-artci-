@@ -1,6 +1,7 @@
 import os, json, random, string, secrets
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
+from upload_service import uploader_document, supprimer_document
 from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token,
@@ -593,6 +594,91 @@ def suivi_public(reference):
         'signe_le': dos.signe_le.isoformat() if dos.signe_le else None,
     })
 
+
+# ══════════════════════════════════════════════════════════
+# PIÈCES JOINTES — ajouter dans app.py avant if __name__
+# ══════════════════════════════════════════════════════════
+
+from upload_service import uploader_document, supprimer_document
+from models import PieceJointe
+
+@app.post('/api/dossiers/<int:dos_id>/pieces-jointes')
+@jwt_required()
+def ajouter_piece_jointe(dos_id):
+    uid = get_jwt_identity()
+    dos = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
+    if not dos:
+        return jsonify({'erreur': 'Dossier introuvable'}), 404
+
+    if 'fichier' not in request.files:
+        return jsonify({'erreur': 'Aucun fichier reçu'}), 400
+
+    fichier  = request.files['fichier']
+    nom_doc  = request.form.get('nom', fichier.filename)
+
+    if fichier.filename == '':
+        return jsonify({'erreur': 'Fichier vide'}), 400
+
+    try:
+        result = uploader_document(fichier, dos_id, nom_doc)
+        pj = PieceJointe(
+            dossier_id = dos_id,
+            nom        = result['nom'],
+            url        = result['url'],
+            public_id  = result['public_id'],
+            type       = result['type'],
+            taille     = result['taille'],
+        )
+        db.session.add(pj)
+        db.session.commit()
+        return jsonify({
+            'id':      pj.id,
+            'nom':     pj.nom,
+            'url':     pj.url,
+            'type':    pj.type,
+            'taille':  pj.taille,
+            'cree_le': pj.cree_le.isoformat(),
+        }), 201
+    except ValueError as e:
+        return jsonify({'erreur': str(e)}), 400
+    except Exception as e:
+        return jsonify({'erreur': f'Erreur upload: {str(e)[:100]}'}), 500
+
+
+@app.get('/api/dossiers/<int:dos_id>/pieces-jointes')
+@jwt_required()
+def lister_pieces_jointes(dos_id):
+    uid = get_jwt_identity()
+    dos = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
+    if not dos:
+        return jsonify({'erreur': 'Dossier introuvable'}), 404
+
+    return jsonify([{
+        'id':      pj.id,
+        'nom':     pj.nom,
+        'url':     pj.url,
+        'type':    pj.type,
+        'taille':  pj.taille,
+        'cree_le': pj.cree_le.isoformat(),
+    } for pj in dos.pieces_jointes])
+
+
+@app.delete('/api/dossiers/<int:dos_id>/pieces-jointes/<int:pj_id>')
+@jwt_required()
+def supprimer_piece_jointe(dos_id, pj_id):
+    uid = get_jwt_identity()
+    dos = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
+    if not dos:
+        return jsonify({'erreur': 'Dossier introuvable'}), 404
+
+    pj = PieceJointe.query.filter_by(id=pj_id, dossier_id=dos_id).first()
+    if not pj:
+        return jsonify({'erreur': 'Pièce jointe introuvable'}), 404
+
+    supprimer_document(pj.public_id)
+    db.session.delete(pj)
+    db.session.commit()
+    return jsonify({'message': 'Pièce jointe supprimée'})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

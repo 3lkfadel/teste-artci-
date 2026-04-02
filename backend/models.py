@@ -11,12 +11,12 @@ class Utilisateur(db.Model):
     mot_de_passe   = db.Column(db.String(255), nullable=False)
     profil_complet = db.Column(db.Boolean, default=False)
 
-    # Vérification email à l'inscription
+    # Vérification email
     email_verifie        = db.Column(db.Boolean, default=False)
     verification_code    = db.Column(db.String(6),   nullable=True)
     verification_expire  = db.Column(db.DateTime,    nullable=True)
 
-    # Double authentification (optionnelle)
+    # A2F
     a2f_active   = db.Column(db.Boolean, default=False)
     otp_temp     = db.Column(db.String(6),  nullable=True)
     otp_expire   = db.Column(db.DateTime,   nullable=True)
@@ -73,3 +73,20 @@ class Dossier(db.Model):
 
     cree_le       = db.Column(db.DateTime, default=datetime.utcnow)
     mis_a_jour_le = db.Column(db.DateTime, onupdate=datetime.utcnow)
+
+    pieces_jointes = db.relationship('PieceJointe', backref='dossier', lazy=True, cascade='all, delete-orphan')
+
+
+class PieceJointe(db.Model):
+    __tablename__ = 'pieces_jointes'
+
+    id         = db.Column(db.Integer, primary_key=True)
+    dossier_id = db.Column(db.Integer, db.ForeignKey('dossiers.id'), nullable=False)
+
+    nom        = db.Column(db.String(255), nullable=False)
+    url        = db.Column(db.Text,        nullable=False)
+    public_id  = db.Column(db.String(255), nullable=False)
+    type       = db.Column(db.String(10),  nullable=False)
+    taille     = db.Column(db.Integer,     nullable=False)
+
+    cree_le    = db.Column(db.DateTime, default=datetime.utcnow)
