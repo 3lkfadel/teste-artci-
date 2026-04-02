@@ -8,6 +8,7 @@ import Signature     from './pages/Signature.jsx'
 import Suivi         from './pages/Suivi.jsx'
 import Parametres from './pages/Parametres.jsx'
 import Admin from './pages/Admin.jsx'
+
 // Dans les routes (public — pas de PrivateRoute) :
 function PrivateRoute({ children }) {
   const token = localStorage.getItem('token')
@@ -41,5 +42,8 @@ export default function App() {
         <Route path="*"                        element={<Navigate to="/auth" replace />} />
       </Routes>
     </BrowserRouter>
+    
+
+      
   )
 }
