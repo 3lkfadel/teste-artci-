@@ -680,5 +680,177 @@ def supprimer_piece_jointe(dos_id, pj_id):
     db.session.commit()
     return jsonify({'message': 'Pièce jointe supprimée'})
 
+@app.post('/api/auth/changer-mot-de-passe')
+@jwt_required()
+def changer_mot_de_passe():
+    uid = get_jwt_identity()
+    d   = request.json or {}
+    mdp_actuel = d.get('mot_de_passe_actuel', '')
+    mdp_nouveau = d.get('nouveau_mot_de_passe', '')
+    u = Utilisateur.query.get(uid)
+    if not u: return jsonify({'erreur': 'Introuvable'}), 404
+    if not check_password_hash(u.mot_de_passe, mdp_actuel):
+        return jsonify({'erreur': 'Mot de passe actuel incorrect'}), 401
+    if len(mdp_nouveau) < 8:
+        return jsonify({'erreur': 'Minimum 8 caractères'}), 400
+    u.mot_de_passe = generate_password_hash(mdp_nouveau)
+    db.session.commit()
+    return jsonify({'message': 'Mot de passe modifié avec succès.'})
+
+
+
+
+# ══════════════════════════════════════════════════════════
+# ADMIN — ajouter dans app.py avant if __name__
+# ══════════════════════════════════════════════════════════
+
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'infinity-admin-2026')
+
+@app.post('/api/admin/login')
+def admin_login():
+    d   = request.json or {}
+    mdp = d.get('password', '')
+    if mdp != ADMIN_PASSWORD:
+        return jsonify({'erreur': 'Mot de passe incorrect'}), 401
+    token = create_access_token(identity='admin', additional_claims={'role': 'admin'})
+    return jsonify({'token': token})
+
+
+def admin_required():
+    from flask_jwt_extended import verify_jwt_in_request, get_jwt
+    verify_jwt_in_request()
+    claims = get_jwt()
+    if claims.get('role') != 'admin':
+        return jsonify({'erreur': 'Accès refusé'}), 403
+    return None
+
+
+@app.get('/api/admin/stats')
+def admin_stats():
+    err = admin_required()
+    if err: return err
+    total_users    = Utilisateur.query.count()
+    total_dossiers = Dossier.query.count()
+    par_statut = {}
+    for statut in ['brouillon','en_attente_signature','en_attente_paiement','transmis','en_cours','complet','refuse']:
+        par_statut[statut] = Dossier.query.filter_by(statut=statut).count()
+    par_type = {}
+    for t in ['declaration','autorisation','dpo','transfert']:
+        par_type[t] = Dossier.query.filter_by(type_formulaire=t).count()
+    return jsonify({
+        'total_users':    total_users,
+        'total_dossiers': total_dossiers,
+        'par_statut':     par_statut,
+        'par_type':       par_type,
+    })
+
+
+@app.get('/api/admin/dossiers')
+def admin_lister_dossiers():
+    err = admin_required()
+    if err: return err
+    page     = request.args.get('page', 1, type=int)
+    statut   = request.args.get('statut', '')
+    per_page = 20
+    query = Dossier.query.order_by(Dossier.cree_le.desc())
+    if statut:
+        query = query.filter_by(statut=statut)
+    total    = query.count()
+    dossiers = query.offset((page-1)*per_page).limit(per_page).all()
+    return jsonify({
+        'total': total,
+        'page':  page,
+        'pages': (total + per_page - 1) // per_page,
+        'dossiers': [{
+            'id':              d.id,
+            'reference':       d.reference,
+            'type_formulaire': d.type_formulaire,
+            'statut':          d.statut,
+            'num_recepisse':   d.num_recepisse,
+            'cree_le':         d.cree_le.isoformat() if d.cree_le else None,
+            'signe_le':        d.signe_le.isoformat() if d.signe_le else None,
+            'utilisateur': {
+                'id':    d.utilisateur.id,
+                'email': d.utilisateur.email,
+            } if d.utilisateur else None,
+        } for d in dossiers]
+    })
+
+
+@app.get('/api/admin/dossiers/<int:dos_id>')
+def admin_get_dossier(dos_id):
+    err = admin_required()
+    if err: return err
+    dos = Dossier.query.get(dos_id)
+    if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
+    return jsonify({
+        'id':              dos.id,
+        'reference':       dos.reference,
+        'type_formulaire': dos.type_formulaire,
+        'statut':          dos.statut,
+        'donnees':         json.loads(dos.donnees or '{}'),
+        'num_recepisse':   dos.num_recepisse,
+        'cree_le':         dos.cree_le.isoformat() if dos.cree_le else None,
+        'signe_le':        dos.signe_le.isoformat() if dos.signe_le else None,
+        'recepisse_le':    dos.recepisse_le.isoformat() if dos.recepisse_le else None,
+        'utilisateur': {
+            'id':    dos.utilisateur.id,
+            'email': dos.utilisateur.email,
+        } if dos.utilisateur else None,
+    })
+
+
+@app.put('/api/admin/dossiers/<int:dos_id>')
+def admin_maj_dossier(dos_id):
+    err = admin_required()
+    if err: return err
+    dos = Dossier.query.get(dos_id)
+    if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
+    d = request.json or {}
+
+    ancien_statut = dos.statut
+    if 'statut' in d:
+        dos.statut = d['statut']
+    if 'num_recepisse' in d:
+        dos.num_recepisse = d['num_recepisse']
+        if d['num_recepisse']:
+            dos.recepisse_le = datetime.utcnow()
+
+    dos.mis_a_jour_le = datetime.utcnow()
+    db.session.commit()
+
+    # Notification email si changement de statut
+    if ancien_statut != dos.statut and dos.utilisateur:
+        send_dossier_status(dos.utilisateur.email, dos.reference, dos.statut)
+
+    return jsonify({'message': 'Dossier mis à jour'})
+
+
+@app.delete('/api/admin/dossiers/<int:dos_id>')
+def admin_supprimer_dossier(dos_id):
+    err = admin_required()
+    if err: return err
+    dos = Dossier.query.get(dos_id)
+    if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
+    db.session.delete(dos)
+    db.session.commit()
+    return jsonify({'message': 'Dossier supprimé'})
+
+
+@app.get('/api/admin/utilisateurs')
+def admin_lister_utilisateurs():
+    err = admin_required()
+    if err: return err
+    users = Utilisateur.query.order_by(Utilisateur.cree_le.desc()).all()
+    return jsonify([{
+        'id':             u.id,
+        'email':          u.email,
+        'email_verifie':  u.email_verifie,
+        'a2f_active':     u.a2f_active,
+        'profil_complet': u.profil_complet,
+        'nb_dossiers':    len(u.dossiers),
+        'cree_le':        u.cree_le.isoformat() if u.cree_le else None,
+    } for u in users])
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL || 'https://artci-backend.onrender.com/api'
+const BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000' 
 
 function getToken() {
   return localStorage.getItem('token')
@@ -52,7 +52,7 @@ export const getProfil              = ()  => req('/auth/profil')
 export const motDePasseOublie        = (d)     => req('/auth/mot-de-passe-oublie',        { method: 'POST', body: JSON.stringify(d) })
 export const reinitialiserMotDePasse = (d)     => req('/auth/reinitialiser-mot-de-passe', { method: 'POST', body: JSON.stringify(d) })
 export const verifierTokenReset      = (token) => req(`/auth/verifier-token-reset?token=${token}`)
-
+export const changerMotDePasse = (d) => req('/auth/changer-mot-de-passe', { method: 'POST', body: JSON.stringify(d) })
 // ── Entreprise ──────────────────────────────────────────────
 export const getEntreprise         = ()  => req('/entreprise')
 export const sauvegarderEntreprise = (d) => req('/entreprise', { method: 'POST', body: JSON.stringify(d) })

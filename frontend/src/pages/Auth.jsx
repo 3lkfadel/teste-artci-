@@ -6,7 +6,7 @@ import * as api from '../api.js'
 
 export default function Auth() {
   const nav = useNavigate()
-
+  const params = new URLSearchParams(window.location.search)
   const [vue, setVue]               = useState('connexion')
   const [email, setEmail]           = useState('')
   const [mdp, setMdp]               = useState('')

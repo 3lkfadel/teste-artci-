@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import * as api from '../api.js'
+import ApercuPDF from './ApercuPDF.jsx'
 
 const LABELS_TYPE = {
   declaration:  'Déclaration de traitement',
@@ -98,7 +99,10 @@ export default function Signature() {
           manuscrite conformément à la Loi n°2013-546 (Art. 37 Al. 4).
         </div>
 
-        {err && <div className="alert alert-err">{err}</div>}
+      {err && <div className="alert alert-err">{err}</div>}
+
+        {/* Aperçu et téléchargement PDF */}
+        <ApercuPDF dossier={{ ...dossier, donnees }} />
 
         <div style={{ display: 'flex', gap: 12 }}>
           <button className="btn btn-primary" onClick={envoyerOtp} disabled={loading}>
@@ -189,9 +193,8 @@ export default function Signature() {
           dossier soit transmis à l'ARTCI.
         </div>
 
-        import PiecesJointes from './PiecesJointes.jsx'
-        // Dans le JSX, après le récapitulatif :
-        <PiecesJointes dossierId={Number(id)} />
+        
+        
 
         <div style={{ display: 'flex', gap: 12 }}>
           <button className="btn btn-primary" onClick={() => nav('/dashboard')}>
