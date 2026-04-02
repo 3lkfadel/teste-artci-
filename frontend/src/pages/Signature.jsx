@@ -189,6 +189,10 @@ export default function Signature() {
           dossier soit transmis à l'ARTCI.
         </div>
 
+        import PiecesJointes from './PiecesJointes.jsx'
+        // Dans le JSX, après le récapitulatif :
+        <PiecesJointes dossierId={Number(id)} />
+
         <div style={{ display: 'flex', gap: 12 }}>
           <button className="btn btn-primary" onClick={() => nav('/dashboard')}>
             Retour au tableau de bord
