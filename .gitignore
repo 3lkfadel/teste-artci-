@@ -22,3 +22,4 @@ instance/
 *.sqlite
 instance/
 backend/instance/
+*.local
