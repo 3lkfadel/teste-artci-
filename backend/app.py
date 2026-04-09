@@ -1,5 +1,13 @@
 import os, json, random, string, secrets
 from datetime import datetime, timedelta
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Charger le .env EN PREMIER avant toute lecture de variable d'environnement
+load_dotenv(Path(__file__).parent / '.env')
+
+import cloudinary
+import cloudinary.uploader
 from flask import Flask, request, jsonify
 from upload_service import uploader_document, supprimer_document
 from flask_cors import CORS
@@ -7,11 +15,11 @@ from flask_jwt_extended import (
     JWTManager, create_access_token,
     jwt_required, get_jwt_identity
 )
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
-from dotenv import load_dotenv
-from pathlib import Path
+import stripe
 
-load_dotenv(Path(__file__).parent / '.env')
 
 from models import db, Utilisateur, Entreprise, Dossier
 from system_prompt import SYSTEM_IA
@@ -26,17 +34,31 @@ from email_service import (
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI']        = os.getenv('DATABASE_URL', 'sqlite:///artci.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY']                 = os.getenv('JWT_SECRET_KEY', 'dev-secret-key')
+_jwt_secret = os.getenv('JWT_SECRET_KEY')
+if not _jwt_secret:
+    raise RuntimeError("JWT_SECRET_KEY non définie. Ajoutez-la dans votre fichier .env")
+app.config['JWT_SECRET_KEY']                 = _jwt_secret
 app.config['JWT_ACCESS_TOKEN_EXPIRES']       = timedelta(hours=8)
 
 CORS(app, origins=[
     'http://localhost:5173',
     'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5000',
     'https://artci-frontend.onrender.com'
 ])
 
+stripe.api_key = os.getenv('STRIPE_SECRET_KEY', '')
+
 db.init_app(app)
 jwt = JWTManager(app)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri='memory://'
+)
 
 with app.app_context():
     db.create_all()
@@ -47,9 +69,9 @@ def code_otp():
     return ''.join(random.choices(string.digits, k=6))
 
 def gen_reference():
-    annee = datetime.utcnow().year
-    count = Dossier.query.count() + 1
-    return f"IC-{annee}-{count:04d}"
+    annee  = datetime.utcnow().year
+    suffixe = secrets.token_hex(3).upper()   # 16^6 ≈ 16M combinaisons, pas de race condition
+    return f"IC-{annee}-{suffixe}"
 
 
 # ══════════════════════════════════════════════════════════
@@ -57,6 +79,7 @@ def gen_reference():
 # ══════════════════════════════════════════════════════════
 
 @app.post('/api/auth/inscription')
+@limiter.limit('5 per minute')
 def inscription():
     d     = request.json or {}
     email = (d.get('email') or '').strip().lower()
@@ -89,8 +112,6 @@ def inscription():
         'utilisateur_id': u.id,
         'email_hint':     email[:3] + '***' + email[email.find('@'):],
         'email_envoye':   envoye,
-        # Mode test uniquement — retirer en prod
-        'code_test':      code
     }), 201
 
 
@@ -131,6 +152,7 @@ def verifier_email():
 
 
 @app.post('/api/auth/renvoyer-verification')
+@limiter.limit('3 per minute')
 def renvoyer_verification():
     d   = request.json or {}
     uid = d.get('utilisateur_id')
@@ -150,11 +172,11 @@ def renvoyer_verification():
     return jsonify({
         'message':      'Nouveau code envoyé.',
         'email_envoye': envoye,
-        'code_test':    code
     })
 
 
 @app.post('/api/auth/connexion')
+@limiter.limit('10 per minute')
 def connexion():
     d     = request.json or {}
     email = (d.get('email') or '').strip().lower()
@@ -173,11 +195,10 @@ def connexion():
         db.session.commit()
         send_verification_inscription(email, code)
         return jsonify({
-            'erreur':         'Email non vérifié. Un nouveau code vous a été envoyé.',
+            'erreur':            'Email non vérifié. Un nouveau code vous a été envoyé.',
             'email_non_verifie': True,
-            'utilisateur_id': u.id,
-            'email_hint':     email[:3] + '***' + email[email.find('@'):],
-            'code_test':      code
+            'utilisateur_id':    u.id,
+            'email_hint':        email[:3] + '***' + email[email.find('@'):],
         }), 403
 
     # A2F optionnelle
@@ -192,7 +213,6 @@ def connexion():
             'utilisateur_id': u.id,
             'email_hint':     email[:3] + '***' + email[email.find('@'):],
             'email_envoye':   envoye,
-            'otp_test':       otp
         })
 
     token = create_access_token(identity=str(u.id))
@@ -204,6 +224,7 @@ def connexion():
 
 
 @app.post('/api/auth/verifier-otp')
+@limiter.limit('10 per minute')
 def verifier_otp():
     d    = request.json or {}
     uid  = d.get('utilisateur_id')
@@ -229,6 +250,7 @@ def verifier_otp():
 
 
 @app.post('/api/auth/renvoyer-otp')
+@limiter.limit('3 per minute')
 def renvoyer_otp():
     d   = request.json or {}
     uid = d.get('utilisateur_id')
@@ -246,7 +268,6 @@ def renvoyer_otp():
     return jsonify({
         'message':      'Nouveau code envoyé.',
         'email_envoye': envoye,
-        'otp_test':     otp
     })
 
 
@@ -362,8 +383,46 @@ def get_entreprise():
         'denomination': e.denomination, 'forme_juridique': e.forme_juridique,
         'rccm': e.rccm, 'fiscal': e.fiscal, 'siege': e.siege,
         'representant': e.representant, 'fonction': e.fonction,
-        'telephone': e.telephone, 'email_droits': e.email_droits, 'secteur': e.secteur
+        'telephone': e.telephone, 'email_droits': e.email_droits, 'secteur': e.secteur,
+        'logo_url': e.logo_url,
     })
+
+
+@app.post('/api/entreprise/logo')
+@jwt_required()
+def upload_logo_entreprise():
+    uid = get_jwt_identity()
+    if 'logo' not in request.files:
+        return jsonify({'erreur': 'Aucun fichier envoyé'}), 400
+    fichier = request.files['logo']
+    if fichier.content_type not in ('image/png', 'image/jpeg'):
+        return jsonify({'erreur': 'Format non autorisé. PNG ou JPG uniquement.'}), 400
+    fichier.seek(0, 2)
+    taille = fichier.tell()
+    fichier.seek(0)
+    if taille > 2 * 1024 * 1024:
+        return jsonify({'erreur': 'Logo trop volumineux. Maximum 2 MB.'}), 400
+    cloudinary.config(
+        cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
+        api_key    = os.getenv('CLOUDINARY_API_KEY'),
+        api_secret = os.getenv('CLOUDINARY_API_SECRET'),
+        secure     = True
+    )
+    result = cloudinary.uploader.upload(
+        fichier,
+        folder          = f'infinity-compliance/logos/{uid}',
+        resource_type   = 'image',
+        use_filename    = True,
+        unique_filename = True,
+        overwrite       = True,
+    )
+    e = Entreprise.query.filter_by(utilisateur_id=uid).first()
+    if not e:
+        e = Entreprise(utilisateur_id=uid)
+        db.session.add(e)
+    e.logo_url = result['secure_url']
+    db.session.commit()
+    return jsonify({'logo_url': e.logo_url})
 
 
 @app.post('/api/entreprise')
@@ -399,16 +458,44 @@ def valider_champ():
     ctx    = d.get('contexte', '')
     mode   = d.get('mode', 'validation')
 
-    api_key = os.getenv('ANTHROPIC_API_KEY', '')
-    if not api_key:
-        return jsonify({'type': 'info', 'message': 'Clé API non configurée.'})
-
     if mode == 'chat':
-        system = SYSTEM_IA + "\n\nMODE CHAT : Réponds en JSON {\"type\":\"info\",\"message\":\"ta réponse\"} avec markdown."
         prompt = f"Contexte:\n{ctx}\n\nQuestion: {valeur}"
     else:
-        system = SYSTEM_IA + "\n\nMODE VALIDATION : JSON {\"type\":\"ok|warn|err|info\",\"message\":\"court\"}. Max 2 phrases."
-        prompt = f"Champ: {champ}\nValeur: {valeur}\nContexte: {ctx}"
+        prompt = f"Champ: {champ}\nValeur: {valeur}\nContexte: {ctx}\nAnalyse ce champ pour un formulaire ARTCI."
+
+    # Ollama en priorité
+    try:
+        import requests as http_req
+        res = http_req.post('http://localhost:11434/api/generate', json={
+            'model':  'infinity-dpo',  # ← déjà bon, on a recréé infinity-dpo avec gemma2:9b
+            'prompt': prompt,
+            'stream': False,
+        }, timeout=30)
+        if res.status_code == 200:
+            text = res.json().get('response', '').strip()
+            text = text.replace('```json', '').replace('```', '').strip()
+            try:
+                return jsonify(json.loads(text))
+            except json.JSONDecodeError:
+                import re
+                type_match = re.search(r'"type"\s*:\s*"(\w+)"', text)
+                msg_match  = re.search(r'"message"\s*:\s*"([\s\S]*)', text)
+                if msg_match:
+                    message = re.sub(r'"\s*}?\s*$', '', msg_match.group(1)).replace('\\"', '"')
+                    return jsonify({'type': type_match.group(1) if type_match else 'info', 'message': message})
+                return jsonify({'type': 'info', 'message': text[:1000]})
+    except Exception as e:
+        print(f"[OLLAMA] Indisponible: {e} — fallback Anthropic")
+
+    # Fallback Anthropic
+    api_key = os.getenv('ANTHROPIC_API_KEY', '')
+    if not api_key:
+        return jsonify({'type': 'info', 'message': 'IA indisponible.'})
+
+    if mode == 'chat':
+        system = SYSTEM_IA + "\n\nMODE CHAT : JSON {\"type\":\"info\",\"message\":\"réponse complète\"}."
+    else:
+        system = SYSTEM_IA + "\n\nMODE VALIDATION : JSON {\"type\":\"ok|warn|err|info\",\"message\":\"court\"}."
 
     try:
         import anthropic
@@ -423,17 +510,10 @@ def valider_champ():
         text = text.replace('```json', '').replace('```', '').strip()
         try:
             return jsonify(json.loads(text))
-        except json.JSONDecodeError:
-            import re
-            type_match = re.search(r'"type"\s*:\s*"(\w+)"', text)
-            msg_match  = re.search(r'"message"\s*:\s*"([\s\S]*)', text)
-            if msg_match:
-                message = re.sub(r'"\s*}?\s*$', '', msg_match.group(1)).replace('\\"', '"')
-                return jsonify({'type': type_match.group(1) if type_match else 'info', 'message': message})
+        except:
             return jsonify({'type': 'info', 'message': text[:1000]})
     except Exception as e:
         return jsonify({'type': 'info', 'message': f'IA indisponible: {str(e)[:60]}'})
-
 
 @app.post('/api/ia/valider-formulaire')
 @jwt_required()
@@ -466,13 +546,27 @@ def valider_formulaire():
 @jwt_required()
 def lister_dossiers():
     uid      = get_jwt_identity()
-    dossiers = Dossier.query.filter_by(utilisateur_id=uid).order_by(Dossier.cree_le.desc()).all()
-    return jsonify([{
-        'id': d.id, 'reference': d.reference,
-        'type_formulaire': d.type_formulaire, 'statut': d.statut,
-        'cree_le': d.cree_le.isoformat() if d.cree_le else None,
-        'mis_a_jour_le': d.mis_a_jour_le.isoformat() if d.mis_a_jour_le else None,
-    } for d in dossiers])
+    page     = request.args.get('page',     1,  type=int)
+    per_page = request.args.get('per_page', 25, type=int)
+    per_page = min(per_page, 100)  # plafond de securite
+
+    pagination = (
+        Dossier.query
+        .filter_by(utilisateur_id=uid)
+        .order_by(Dossier.cree_le.desc())
+        .paginate(page=page, per_page=per_page, error_out=False)
+    )
+    return jsonify({
+        'dossiers': [{
+            'id': d.id, 'reference': d.reference,
+            'type_formulaire': d.type_formulaire, 'statut': d.statut,
+            'cree_le': d.cree_le.isoformat() if d.cree_le else None,
+            'mis_a_jour_le': d.mis_a_jour_le.isoformat() if d.mis_a_jour_le else None,
+        } for d in pagination.items],
+        'total': pagination.total,
+        'page':  pagination.page,
+        'pages': pagination.pages,
+    })
 
 
 @app.post('/api/dossiers')
@@ -485,7 +579,7 @@ def creer_dossier():
         reference       = gen_reference(),
         type_formulaire = d.get('type_formulaire', 'declaration'),
         statut          = 'brouillon',
-        donnees         = json.dumps(d.get('donnees', {}))
+        donnees         = d.get('donnees', {})
     )
     db.session.add(dos)
     db.session.commit()
@@ -501,7 +595,8 @@ def get_dossier(dos_id):
     return jsonify({
         'id': dos.id, 'reference': dos.reference,
         'type_formulaire': dos.type_formulaire, 'statut': dos.statut,
-        'donnees': json.loads(dos.donnees or '{}'),
+        'donnees': dos.donnees or {},
+        'signature_image': dos.signature_image,
         'cree_le': dos.cree_le.isoformat() if dos.cree_le else None,
         'signe_le': dos.signe_le.isoformat() if dos.signe_le else None,
     })
@@ -515,7 +610,7 @@ def maj_dossier(dos_id):
     if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
     d = request.json or {}
     if 'donnees' in d:
-        dos.donnees = json.dumps(d['donnees'])
+        dos.donnees = d['donnees']
     if 'statut' in d:
         ancien = dos.statut
         dos.statut = d['statut']
@@ -562,15 +657,34 @@ def confirmer_signature():
     d      = request.json or {}
     dos_id = d.get('dossier_id')
     code   = (d.get('code') or '').strip()
+    signature_image = d.get('signature_image')  # ← nouveau
     dos    = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
     if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
     if dos.otp_signature != code:
         return jsonify({'erreur': 'Code OTP incorrect'}), 401
 
-    dos.otp_signature = None
-    dos.statut        = 'en_attente_paiement'
-    dos.signe_le      = datetime.utcnow()
-    dos.mis_a_jour_le = datetime.utcnow()
+    dos.otp_signature   = None
+    dos.statut          = 'en_attente_paiement'
+    dos.signe_le        = datetime.utcnow()
+    dos.mis_a_jour_le   = datetime.utcnow()
+    if signature_image:
+        try:
+            import cloudinary, cloudinary.uploader
+            cloudinary.config(
+                cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
+                api_key    = os.getenv('CLOUDINARY_API_KEY'),
+                api_secret = os.getenv('CLOUDINARY_API_SECRET'),
+            )
+            result = cloudinary.uploader.upload(
+                signature_image,
+                folder        = f'infinity-compliance/signatures',
+                public_id     = f'sig_{dos.reference}',
+                resource_type = 'image',
+                overwrite     = True,
+            )
+            dos.signature_image = result.get('secure_url')
+        except Exception:
+            pass  # si l'upload echoue, on continue sans image
     db.session.commit()
 
     u = Utilisateur.query.get(uid)
@@ -704,13 +818,16 @@ def changer_mot_de_passe():
 # ADMIN — ajouter dans app.py avant if __name__
 # ══════════════════════════════════════════════════════════
 
-ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'infinity-admin-2026')
+_admin_password_hash = os.getenv('ADMIN_PASSWORD_HASH')
 
 @app.post('/api/admin/login')
+@limiter.limit('5 per minute')
 def admin_login():
+    if not _admin_password_hash:
+        return jsonify({'erreur': 'Panel admin non configuré'}), 503
     d   = request.json or {}
     mdp = d.get('password', '')
-    if mdp != ADMIN_PASSWORD:
+    if not check_password_hash(_admin_password_hash, mdp):
         return jsonify({'erreur': 'Mot de passe incorrect'}), 401
     token = create_access_token(identity='admin', additional_claims={'role': 'admin'})
     return jsonify({'token': token})
@@ -788,7 +905,7 @@ def admin_get_dossier(dos_id):
         'reference':       dos.reference,
         'type_formulaire': dos.type_formulaire,
         'statut':          dos.statut,
-        'donnees':         json.loads(dos.donnees or '{}'),
+        'donnees':         dos.donnees or {},
         'num_recepisse':   dos.num_recepisse,
         'cree_le':         dos.cree_le.isoformat() if dos.cree_le else None,
         'signe_le':        dos.signe_le.isoformat() if dos.signe_le else None,
@@ -856,5 +973,54 @@ def admin_lister_utilisateurs():
 def health():
     return jsonify({'status': 'ok'})
 
+
+
+
+@app.post('/api/paiement/stripe/create-intent')
+@jwt_required()
+def stripe_create_intent():
+    uid = get_jwt_identity()
+    d   = request.json or {}
+    dos_id = d.get('dossier_id')
+    dos = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
+    if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
+
+    # Frais en FCFA (XOF). Taux fixe officiel : 1 EUR = 655.957 XOF
+    FRAIS_FCFA = { 'declaration': 8000, 'autorisation': 16000, 'dpo': 5000, 'transfert': 12000 }
+    montant_fcfa = FRAIS_FCFA.get(dos.type_formulaire, 8000)
+    # Conversion en centimes EUR pour Stripe (arrondi au centime supérieur)
+    montant_eur_centimes = max(50, round(montant_fcfa / 655.957 * 100))
+
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=montant_eur_centimes,
+            currency='eur',  # XOF non supporté par Stripe
+            metadata={ 'dossier_id': dos_id, 'reference': dos.reference }
+        )
+        return jsonify({ 'client_secret': intent.client_secret, 'montant_fcfa': montant_fcfa, 'montant_eur_centimes': montant_eur_centimes })
+    except Exception as e:
+        return jsonify({'erreur': str(e)}), 500
+
+
+@app.post('/api/paiement/stripe/confirm')
+@jwt_required()
+def stripe_confirm():
+    uid = get_jwt_identity()
+    d   = request.json or {}
+    dos_id = d.get('dossier_id')
+    dos = Dossier.query.filter_by(id=dos_id, utilisateur_id=uid).first()
+    if not dos: return jsonify({'erreur': 'Dossier introuvable'}), 404
+    dos.statut        = 'transmis'
+    dos.mis_a_jour_le = datetime.utcnow()
+    db.session.commit()
+    u = Utilisateur.query.get(uid)
+    if u: send_dossier_status(u.email, dos.reference, 'transmis')
+    return jsonify({'message': 'Paiement confirmé, dossier transmis.'})
+
+
+
+
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(debug=debug, port=5000)

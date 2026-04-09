@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL ||  'https://artci-backend.onrender.com/api'
+const BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000/api'
 
 function getToken() {
   return localStorage.getItem('token')
@@ -6,7 +6,9 @@ function getToken() {
 
 function sessionExpiree() {
   localStorage.removeItem('token')
-  window.location.href = '/auth?session=expiree'
+  // Sauvegarder l'URL actuelle pour y revenir après connexion
+  const urlActuelle = window.location.pathname
+  window.location.href = `/auth?session=expiree&redirect=${urlActuelle}`
 }
 
 async function req(path, options = {}) {
@@ -57,19 +59,35 @@ export const changerMotDePasse = (d) => req('/auth/changer-mot-de-passe', { meth
 export const getEntreprise         = ()  => req('/entreprise')
 export const sauvegarderEntreprise = (d) => req('/entreprise', { method: 'POST', body: JSON.stringify(d) })
 
+export async function uploadLogo(formData) {
+  const token = getToken()
+  const res = await fetch(`${BASE}/entreprise/logo`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  })
+  if (res.status === 401 && token) { sessionExpiree(); return }
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.erreur || `Erreur ${res.status}`)
+  return data
+}
+
 // ── IA ──────────────────────────────────────────────────────
 export const validerChamp      = (d) => req('/ia/valider-champ',      { method: 'POST', body: JSON.stringify(d) })
 export const validerFormulaire = (d) => req('/ia/valider-formulaire', { method: 'POST', body: JSON.stringify(d) })
 
 // ── Dossiers ────────────────────────────────────────────────
-export const listerDossiers = ()      => req('/dossiers')
+export const listerDossiers = (page = 1, perPage = 25) => req(`/dossiers?page=${page}&per_page=${perPage}`)
 export const creerDossier   = (d)     => req('/dossiers',       { method: 'POST', body: JSON.stringify(d) })
 export const getDossier     = (id)    => req(`/dossiers/${id}`)
 export const majDossier     = (id, d) => req(`/dossiers/${id}`, { method: 'PUT',  body: JSON.stringify(d) })
 
 // ── Signature ───────────────────────────────────────────────
 export const envoyerOtpSignature = (d) => req('/signature/envoyer-otp', { method: 'POST', body: JSON.stringify(d) })
-export const confirmerSignature  = (d) => req('/signature/confirmer',   { method: 'POST', body: JSON.stringify(d) })
-
+export const confirmerSignature = (d) => req('/signature/confirmer', { method:'POST', body:JSON.stringify(d) })
 // ── Suivi public ────────────────────────────────────────────
 export const suiviPublic = (ref) => req(`/suivi/${ref}`)
+
+export const stripeCreateIntent = (d) => req('/paiement/stripe/create-intent', { method:'POST', body:JSON.stringify(d) })
+export const stripeConfirm      = (d) => req('/paiement/stripe/confirm',         { method:'POST', body:JSON.stringify(d) })
+

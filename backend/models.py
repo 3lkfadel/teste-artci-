@@ -7,7 +7,7 @@ class Utilisateur(db.Model):
     __tablename__ = 'utilisateurs'
 
     id             = db.Column(db.Integer, primary_key=True)
-    email          = db.Column(db.String(255), unique=True, nullable=False)
+    email          = db.Column(db.String(255), unique=True, nullable=False, index=True)
     mot_de_passe   = db.Column(db.String(255), nullable=False)
     profil_complet = db.Column(db.Boolean, default=False)
 
@@ -35,7 +35,7 @@ class Entreprise(db.Model):
     __tablename__ = 'entreprises'
 
     id             = db.Column(db.Integer, primary_key=True)
-    utilisateur_id = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
+    utilisateur_id = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False, index=True)
 
     denomination    = db.Column(db.String(255))
     forme_juridique = db.Column(db.String(50))
@@ -47,6 +47,7 @@ class Entreprise(db.Model):
     telephone       = db.Column(db.String(50))
     email_droits    = db.Column(db.String(255))
     secteur         = db.Column(db.String(100))
+    logo_url        = db.Column(db.String(500), nullable=True)
 
     cree_le       = db.Column(db.DateTime, default=datetime.utcnow)
     mis_a_jour_le = db.Column(db.DateTime, onupdate=datetime.utcnow)
@@ -56,12 +57,12 @@ class Dossier(db.Model):
     __tablename__ = 'dossiers'
 
     id              = db.Column(db.Integer, primary_key=True)
-    utilisateur_id  = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
+    utilisateur_id  = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False, index=True)
 
-    reference       = db.Column(db.String(20),  unique=True, nullable=False)
+    reference       = db.Column(db.String(20),  unique=True, nullable=False, index=True)
     type_formulaire = db.Column(db.String(50),  nullable=False)
-    statut          = db.Column(db.String(50),  default='brouillon')
-    donnees         = db.Column(db.Text,        default='{}')
+    statut          = db.Column(db.String(50),  default='brouillon', index=True)
+    donnees         = db.Column(db.JSON,        default=dict)
 
     # Signature
     otp_signature = db.Column(db.String(6),  nullable=True)
@@ -70,7 +71,8 @@ class Dossier(db.Model):
     # Récépissé ARTCI
     num_recepisse = db.Column(db.String(100), nullable=True)
     recepisse_le  = db.Column(db.DateTime,   nullable=True)
-
+    signature_image = db.Column(db.String(500), nullable=True)  # URL Cloudinary
+    
     cree_le       = db.Column(db.DateTime, default=datetime.utcnow)
     mis_a_jour_le = db.Column(db.DateTime, onupdate=datetime.utcnow)
 

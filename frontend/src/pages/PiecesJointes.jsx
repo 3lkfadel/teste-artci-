@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
 
-const BASE = import.meta.env.VITE_API_URL || 'https://artci-backend.onrender.com/api'
+const BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000/api'
 
 function getToken() { return localStorage.getItem('token') }
 

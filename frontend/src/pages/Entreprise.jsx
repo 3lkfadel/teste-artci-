@@ -3,17 +3,17 @@ import { useNavigate } from 'react-router-dom'
 import * as api from '../api.js'
 
 const CHAMPS = [
-  { id: 'denomination',   label: 'Dénomination sociale',          required: true  },
-  { id: 'forme_juridique',label: 'Forme juridique',               required: false, type: 'select',
-    options: ['','SA','SARL','SAS','EI','ONG','Organisme public'] },
-  { id: 'rccm',           label: 'Numéro RCCM',                   required: true,  placeholder: 'CI-ABJ-2018-B-12345' },
-  { id: 'fiscal',         label: 'Numéro fiscal',                 required: true,  placeholder: '1234567 A' },
-  { id: 'siege',          label: 'Siège social',                  required: true,  placeholder: 'Abidjan Plateau, Immeuble CCIA' },
-  { id: 'representant',   label: 'Représentant légal',            required: true  },
-  { id: 'fonction',       label: 'Fonction du représentant',      required: true,  placeholder: 'Directeur Général' },
-  { id: 'telephone',      label: 'Téléphone (signature OTP)',     required: true,  placeholder: '+225 07 00 00 00 00' },
-  { id: 'email_droits',   label: 'Email de contact droits ARTCI', required: true,  type: 'email', placeholder: 'droits@entreprise.ci' },
-  { id: 'secteur',        label: "Secteur d'activité",            required: false },
+  { id:'denomination',   label:'Dénomination sociale',          required:true  },
+  { id:'forme_juridique',label:'Forme juridique',               required:false, type:'select',
+    options:['','SA','SARL','SAS','EI','ONG','Organisme public'] },
+  { id:'rccm',           label:'Numéro RCCM',                   required:true,  placeholder:'CI-ABJ-2018-B-12345' },
+  { id:'fiscal',         label:'Numéro fiscal (N°CC)',           required:true,  placeholder:'1234567 A' },
+  { id:'siege',          label:'Siège social',                   required:true,  placeholder:'Abidjan Plateau, Immeuble CCIA...' },
+  { id:'representant',   label:'Représentant légal',             required:true  },
+  { id:'fonction',       label:'Fonction du représentant',       required:true,  placeholder:'Directeur Général' },
+  { id:'telephone',      label:'Téléphone',                      required:true,  placeholder:'+225 07 00 00 00 00' },
+  { id:'email_droits',   label:'Email de contact droits ARTCI',  required:true,  type:'email' },
+  { id:'secteur',        label:"Secteur d'activité",             required:false },
 ]
 
 function useDebounce(delay = 1200) {
@@ -26,6 +26,8 @@ function useDebounce(delay = 1200) {
 
 export default function Entreprise() {
   const nav = useNavigate()
+  const isNouveau = new URLSearchParams(window.location.search).get('nouveau') === 'true'
+
   const [form, setForm]           = useState({})
   const [feedbacks, setFeedbacks] = useState({})
   const [analyzing, setAnalyzing] = useState({})
@@ -35,9 +37,7 @@ export default function Entreprise() {
   const debounce = useDebounce()
 
   useEffect(() => {
-    api.getEntreprise()
-      .then(d => { if (d) setForm(d) })
-      .catch(() => {})
+    api.getEntreprise().then(d => { if (d) setForm(d) }).catch(() => {})
   }, [])
 
   const setFb = (id, v) => setFeedbacks(f => ({ ...f, [id]: v }))
@@ -51,11 +51,8 @@ export default function Entreprise() {
       try {
         const r = await api.validerChamp({ champ: id, valeur, contexte: id })
         setFb(id, r)
-      } catch {
-        setFb(id, { type: 'info', message: 'IA indisponible.' })
-      } finally {
-        setAn(id, false)
-      }
+      } catch { setFb(id, { type:'info', message:'IA indisponible.' }) }
+      finally { setAn(id, false) }
     })
   }
 
@@ -64,14 +61,10 @@ export default function Entreprise() {
     setErr(''); setOk('')
     setLoading(true)
     try {
-      const r = await api.sauvegarderEntreprise(form)
-      setOk('Profil sauvegardé.')
-      if (r.profil_complet) setTimeout(() => nav('/dashboard'), 800)
-    } catch (e) {
-      setErr(e.message)
-    } finally {
-      setLoading(false)
-    }
+      await api.sauvegarderEntreprise(form)
+      setOk('Profil sauvegardé avec succès.')
+      setTimeout(() => nav('/dashboard'), 900)
+    } catch (e) { setErr(e.message) } finally { setLoading(false) }
   }
 
   function renderFb(id) {
@@ -82,66 +75,77 @@ export default function Entreprise() {
   }
 
   return (
-    <>
-      <nav className="nav">
-        <div className="nav-logo">Infinity Compliance</div>
-        <div className="nav-right">
-          <span className="nav-link" onClick={() => nav('/dashboard')}>Tableau de bord</span>
-          <span className="nav-link" onClick={() => { localStorage.removeItem('token'); nav('/auth') }}>Déconnexion</span>
-        </div>
-      </nav>
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'flex-start', justifyContent:'center', padding:'40px 20px' }}>
+      <div style={{ width:'100%', maxWidth:600 }}>
 
-      <div className="page">
-        <h1>Profil de l'entreprise</h1>
-        <p className="subtitle">
-          Ces informations seront pré-remplies dans tous vos formulaires ARTCI.
-          L'assistant IA valide chaque champ en temps réel.
-        </p>
+        {/* Header */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
+            <div style={{ width:40, height:40, borderRadius:8, background:'var(--green)', display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontWeight:700, fontSize:16 }}>IC</div>
+            <div style={{ fontSize:13, color:'var(--text-3)' }}>Infinity Compliance</div>
+          </div>
+
+          {isNouveau ? (
+            <div style={{ background:'var(--green-light)', border:'1px solid var(--green-mid)', borderRadius:10, padding:'16px 20px', marginBottom:20 }}>
+              <div style={{ fontWeight:600, fontSize:15, color:'var(--green-dark)', marginBottom:4 }}>
+                Bienvenue !
+              </div>
+              <div style={{ fontSize:13, color:'var(--green-dark)', lineHeight:1.6 }}>
+                Complétez votre profil entreprise pour pré-remplir vos formulaires automatiquement.
+              </div>
+            </div>
+          ) : null}
+
+          <div style={{ fontSize:22, fontWeight:700, color:'var(--text)', marginBottom:4 }}>Mon entreprise</div>
+          <div style={{ fontSize:13, color:'var(--text-3)' }}>Ces informations seront pré-remplies dans vos formulaires ARTCI</div>
+        </div>
 
         {err && <div className="alert alert-err">{err}</div>}
         {ok  && <div className="alert alert-ok">{ok}</div>}
 
-        <form onSubmit={sauvegarder}>
-          {CHAMPS.map(c => (
-            <div className="field" key={c.id}>
-              <label>
-                {c.label} {c.required && <span className="required">*</span>}
-              </label>
+        <div className="card">
+          <form onSubmit={sauvegarder}>
+            {CHAMPS.map(c => (
+              <div className="field" key={c.id}>
+                <label>{c.label} {c.required && <span className="required">*</span>}</label>
+                {c.type === 'select' ? (
+                  <select value={form[c.id] || ''} onChange={e => onInput(c.id, e.target.value)}>
+                    {c.options.map(o => <option key={o} value={o}>{o || '-- Choisir --'}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    type={c.type || 'text'}
+                    value={form[c.id] || ''}
+                    onChange={e => onInput(c.id, e.target.value)}
+                    placeholder={c.placeholder || ''}
+                  />
+                )}
+                {renderFb(c.id)}
+              </div>
+            ))}
 
-              {c.type === 'select' ? (
-                <select
-                  value={form[c.id] || ''}
-                  onChange={e => onInput(c.id, e.target.value)}
+            <div style={{ display:'flex', gap:12, marginTop:8 }}>
+              <button className="btn btn-primary" disabled={loading}>
+                {loading ? 'Sauvegarde...' : 'Compléter mon profil →'}
+              </button>
+              {isNouveau && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => nav('/dashboard')}
                 >
-                  {c.options.map(o => <option key={o} value={o}>{o || '-- Choisir --'}</option>)}
-                </select>
-              ) : (
-                <input
-                  type={c.type || 'text'}
-                  value={form[c.id] || ''}
-                  onChange={e => onInput(c.id, e.target.value)}
-                  placeholder={c.placeholder || ''}
-                />
+                  Passer pour l'instant → Aller au dashboard
+                </button>
               )}
-
-              {renderFb(c.id)}
+              {!isNouveau && (
+                <button type="button" className="btn btn-secondary" onClick={() => nav('/dashboard')}>
+                  Annuler
+                </button>
+              )}
             </div>
-          ))}
-
-          <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-            <button className="btn btn-primary" disabled={loading}>
-              {loading ? 'Sauvegarde...' : 'Sauvegarder et continuer'}
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => nav('/dashboard')}
-            >
-              Tableau de bord
-            </button>
-          </div>
-        </form>
+          </form>
+        </div>
       </div>
-    </>
+    </div>
   )
 }
