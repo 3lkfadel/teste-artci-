@@ -11,6 +11,7 @@ const FORMULAIRES = [
   { type:'autorisation', titre:"Demande d'autorisation",           desc:'Pour les données sensibles : biométrie, santé, NNI...',                   icon:'🛡️', badge:'Données sensibles',  sensible:true  },
   { type:'dpo',          titre:'Correspondant DPO',                desc:'Désigner officiellement votre Délégué à la Protection des Données.',      icon:'👤', badge:'Correspondant DPO',  sensible:false },
   { type:'transfert',    titre:'Transfert international',          desc:"Pour tout envoi de données personnelles hors de Côte d'Ivoire.",          icon:'🌍', badge:'Transfert international', sensible:false },
+  { type:'sva',          titre:'Déclaration SVA',                  desc:'Pour toute startup, app mobile, call center, plateforme web ou service USSD.', icon:'📡', badge:'Service Télécom',          sensible:false },
 ]
 
 const LABELS_STATUT = {
@@ -28,6 +29,8 @@ const LABELS_TYPE = {
   autorisation: 'Autorisation',
   dpo:          'DPO',
   transfert:    'Transfert',
+  sva:          'SVA',
+  ussd:         'Code USSD',
 }
 
 // ── Page Dashboard ─────────────────────────────────────────
@@ -240,6 +243,20 @@ export default function Dashboard() {
                                 onClick={() => setDossierDocuments(dossierDocuments === d.id ? null : d.id)}
                               >
                                 📎 Docs
+                              </button>
+                            )}
+                            {d.type_formulaire === 'sva' && d.statut === 'complet' && (
+                              <button
+                                className="btn-link"
+                                style={{ color: 'var(--green)', fontWeight: 500 }}
+                                onClick={async () => {
+                                  try {
+                                    const r = await api.creerDossier({ type_formulaire: 'ussd', donnees: {} })
+                                    nav(`/formulaire/ussd/${r.id}`)
+                                  } catch (e) { alert(e.message) }
+                                }}
+                              >
+                                📡 Demander USSD
                               </button>
                             )}
                           </div>

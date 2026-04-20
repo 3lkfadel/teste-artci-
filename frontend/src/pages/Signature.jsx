@@ -10,6 +10,8 @@ const LABELS_TYPE = {
   autorisation: "Demande d'autorisation préalable",
   dpo:          'Enregistrement correspondant DPO',
   transfert:    'Transfert international de données',
+  sva:          'Déclaration SVA — Service à Valeur Ajoutée',
+  ussd:         'Demande de code USSD',
 }
 
 export default function Signature() {

@@ -6,6 +6,8 @@ const LABELS_TYPE = {
   autorisation: "Demande d'autorisation préalable",
   dpo:          'Enregistrement correspondant DPO',
   transfert:    "Demande de transfert de données à l'étranger",
+  sva:          'Déclaration SVA — Service à Valeur Ajoutée (Régime C4)',
+  ussd:         'Demande de code USSD — ARTCI',
 }
 
 const LABELS_CHAMPS = {
@@ -59,6 +61,41 @@ const LABELS_CHAMPS = {
   dpo_email:                'Email du DPO',
   dpo_telephone:            'Téléphone du DPO',
   dpo_qualification:        'Qualification du DPO',
+  type_demande:             'Type de demande',
+  numero_recepisse_ancien:  'N° récépissé précédent',
+  date_echeance_ancien:     "Date d'échéance précédente",
+  types_services:           'Types de services',
+  autres_services_detail:   'Autres services (détail)',
+  adresse_geo:              'Adresse géographique',
+  adresse_postale:          'Adresse postale',
+  telephone_mobile:         'Téléphone mobile',
+  telephone_fixe:           'Téléphone fixe',
+  rccm_numero:              'N° RCCM',
+  rccm_date:                'Date inscription RCCM',
+  activites_principales:    'Activités principales',
+  rep_prenoms:              'Prénoms représentant légal',
+  rep_piece_type:           "Type pièce d'identité",
+  rep_piece_numero:         "N° pièce d'identité",
+  forme_juridique:          'Forme juridique',
+  capital_social:           'Capital social',
+  actionnariat:             'Composition actionnariat',
+  services_exploites:       'Services à exploiter',
+  description_detaillee:    'Description détaillée',
+  caracteristiques_equipements: 'Équipements',
+  partenaires_operateurs:   'Opérateurs partenaires',
+  conditions_acces:         "Conditions d'accès",
+  couverture_geo:           'Couverture géographique',
+  tarifs:                   'Tarifs applicables',
+  engagement_reglementaire: 'Engagement réglementaire',
+  signataire_qualite:       'Qualité du signataire',
+  lieu_signature:           'Lieu de signature',
+  numero_recepisse_sva:     'N° récépissé SVA',
+  date_recepisse_sva:       'Date récépissé SVA',
+  code_ussd_souhaite:       'Code USSD souhaité',
+  type_service_ussd:        'Type de service USSD',
+  description_service_ussd: 'Description service USSD',
+  operateurs_cibles:        'Opérateurs ciblés',
+  nombre_utilisateurs_estimes: 'Utilisateurs estimés',
 }
 
 // Champs à exclure du tableau (internes)
@@ -70,10 +107,34 @@ function formaterValeur(val) {
   return String(val)
 }
 
-export function genererPDF(dossier, logoUrl = null) {
+// Convertit une URL distante en base64 data URL (contourne les limites de jsPDF)
+async function urlToBase64(url) {
+  const res  = await fetch(url, { mode: 'cors' })
+  const blob = await res.blob()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload  = () => resolve(reader.result)
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+}
+
+export async function genererPDF(dossier, logoUrl = null) {
   const doc  = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' })
   const now  = new Date().toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
   const donnees = dossier.donnees || {}
+
+  // Pré-charger les images en base64 avant toute opération jsPDF
+  let signatureB64 = null
+  let logoB64      = null
+  await Promise.all([
+    dossier.signature_image
+      ? urlToBase64(dossier.signature_image).then(b => { signatureB64 = b }).catch(() => {})
+      : Promise.resolve(),
+    logoUrl
+      ? urlToBase64(logoUrl).then(b => { logoB64 = b }).catch(() => {})
+      : Promise.resolve(),
+  ])
 
   // ── En-tête ──────────────────────────────────────────────
   doc.setFillColor(0, 132, 61)  // vert ARTCI
@@ -90,9 +151,9 @@ export function genererPDF(dossier, logoUrl = null) {
   doc.text(`Généré le : ${now}`, 14, 25)
 
   // Logo entreprise (coin supérieur droit)
-  if (logoUrl) {
+  if (logoB64) {
     try {
-      doc.addImage(logoUrl, 'AUTO', 168, 4, 22, 22)
+      doc.addImage(logoB64, 'AUTO', 168, 4, 22, 22)
     } catch(e) { /* logo non disponible, on continue */ }
   }
 
@@ -173,7 +234,7 @@ export function genererPDF(dossier, logoUrl = null) {
   const startY = sigY > 230 ? 20 : sigY
 
   doc.setFillColor(245, 245, 245)
-  doc.roundedRect(14, startY, 182, dossier.signature_image ? 55 : 35, 2, 2, 'F')
+  doc.roundedRect(14, startY, 182, signatureB64 ? 55 : 35, 2, 2, 'F')
 
   doc.setFontSize(9)
   doc.setFont('helvetica', 'bold')
@@ -194,24 +255,14 @@ export function genererPDF(dossier, logoUrl = null) {
   doc.text(`Fonction : ${fonctionSig}`, 18, startY + 21)
   doc.text(`Date : ${dateSig}`, 18, startY + 27)
 
-  // Intégrer l'image de signature si disponible
-  if (dossier.signature_image) {
-    try {
-      doc.addImage(dossier.signature_image, 'PNG', 100, startY + 8, 80, 35)
-      // Ligne de signature
-      doc.setDrawColor(200, 200, 200)
-      doc.line(100, startY + 43, 180, startY + 43)
-      doc.setFontSize(7)
-      doc.setTextColor(136, 136, 136)
-      doc.text('Signature manuscrite', 100, startY + 48)
-    } catch(e) {
-      // Si erreur image, afficher placeholder
-      doc.setDrawColor(200, 200, 200)
-      doc.rect(100, startY + 8, 80, 30)
-      doc.setFontSize(8)
-      doc.setTextColor(136, 136, 136)
-      doc.text('[Signature]', 130, startY + 25)
-    }
+  // Intégrer l'image de signature (déjà en base64)
+  if (signatureB64) {
+    doc.addImage(signatureB64, 'PNG', 100, startY + 8, 80, 35)
+    doc.setDrawColor(200, 200, 200)
+    doc.line(100, startY + 43, 180, startY + 43)
+    doc.setFontSize(7)
+    doc.setTextColor(136, 136, 136)
+    doc.text('Signature manuscrite', 100, startY + 48)
   } else {
     // Cadre vide pour signature manuelle
     doc.setDrawColor(180, 180, 180)
@@ -222,7 +273,7 @@ export function genererPDF(dossier, logoUrl = null) {
   }
 
   // ── Mention légale ────────────────────────────────────────
-  const mentionY = startY + (dossier.signature_image ? 62 : 42)
+  const mentionY = startY + (signatureB64 ? 62 : 42)
   if (mentionY < 275) {
     doc.setFontSize(7)
     doc.setTextColor(136, 136, 136)
@@ -249,13 +300,13 @@ export function genererPDF(dossier, logoUrl = null) {
   return doc
 }
 
-export function telechargerPDF(dossier, logoUrl = null) {
-  const doc = genererPDF(dossier, logoUrl)
+export async function telechargerPDF(dossier, logoUrl = null) {
+  const doc = await genererPDF(dossier, logoUrl)
   doc.save(`${dossier.reference || 'dossier'}_ARTCI.pdf`)
 }
 
-export function ouvrirPDFNouvelOnglet(dossier, logoUrl = null) {
-  const doc  = genererPDF(dossier, logoUrl)
+export async function ouvrirPDFNouvelOnglet(dossier, logoUrl = null) {
+  const doc  = await genererPDF(dossier, logoUrl)
   const blob = doc.output('blob')
   const url  = URL.createObjectURL(blob)
   window.open(url, '_blank')

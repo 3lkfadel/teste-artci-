@@ -244,6 +244,90 @@ OBLIGATOIRE : Appartenir à l'organisme déclarant.
 OBLIGATOIRE : Être de NATIONALITÉ IVOIRIENNE.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FORMULAIRE USSD — DEMANDE DE CODE USSD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Prérequis : Le demandeur doit disposer d'un récépissé SVA (Régime C4) délivré par l'ARTCI.
+Base légale : Décision n°2023-966 du 19 octobre 2023 + Ordonnance n°2012-293 du 21 mars 2012.
+Frais : GRATUIT depuis la décision n°2023-966.
+Direction compétente : Direction de la Régulation des Télécommunications (DRT).
+Contact ARTCI : +225 27 20 34 43 68 — kadjo.sandrine@artci.ci / traore.abou@artci.ci
+Dépôt : Guichet Unique ARTCI, Marcory Anoumabo. Le choix définitif du numéro USSD se fait sur place.
+
+SECTION 1 — RÉCÉPISSÉ SVA
+Numéro du récépissé SVA (obligatoire) et date d'obtention.
+Format du numéro : ARTCI-SVA-ANNÉE-XXX.
+
+SECTION 2 — IDENTITÉ DE LA SOCIÉTÉ
+Dénomination, RCCM, adresse, téléphone, email de contact.
+
+SECTION 3 — CODE USSD DEMANDÉ
+Format du code souhaité : *XXX# ou *XXX*X#.
+Type de service : Mobile Money, Renseignement, Bancaire, Santé, Éducatif, Commercial, Agricole, Autre.
+Description détaillée du parcours utilisateur (que se passe-t-il quand l'utilisateur compose le code ?).
+
+SECTION 4 — OPÉRATEURS ET COUVERTURE
+Opérateurs ciblés : Orange CI, MTN CI, Moov Africa CI (obligatoires par la réglementation).
+Couverture géographique : Abidjan ou territoire national.
+Volume d'utilisateurs estimés.
+
+SECTION 5 — REPRÉSENTANT ET ENGAGEMENT
+Représentant légal (nom, qualité, nationalité ivoirienne obligatoire).
+Engagement de respect de la décision n°2023-966 et de l'ordonnance n°2012-293.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FORMULAIRE SVA — DÉCLARATION SERVICE À VALEUR AJOUTÉE (RÉCÉPISSÉ C4)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Applicable à : startups, fintechs, call centers, plateformes web, services USSD, messageries.
+Base légale : Ordonnance n°2012-293 du 21 mars 2012 relative aux Télécommunications et TIC.
+Direction compétente : Direction des Activités des Télécommunications (DATE) — Tél : 20 34 42 56
+Frais : 1 798 000 FCFA (acompte 30% = 539 400 FCFA à la soumission)
+
+SECTION 1 — TYPE DE DEMANDE
+- Première demande ou renouvellement.
+- Si renouvellement : numéro du récépissé précédent et date d'échéance obligatoires.
+
+SECTION 2 — TYPE DE SERVICE
+Services SVA déclarables :
+- Mise en place d'une plateforme Web
+- Messagerie vocale et/ou écrite (SVA)
+- Exploitation d'un centre d'appel téléphonique (SVA)
+- Autres types (à préciser)
+Plusieurs services peuvent être cochés simultanément.
+
+SECTION 3 — IDENTITÉ DE LA SOCIÉTÉ
+Champs requis : Dénomination/Raison sociale, Adresse géographique précise (+ schéma A4 à joindre),
+Adresse postale, Téléphone mobile, Téléphone fixe, N° RCCM ivoirien (format CI-ABJ-ANNÉE-B-NUMÉRO),
+Date d'inscription RCCM, Activités principales.
+IMPORTANT : Le N° RCCM est différent du N°CC fiscal. Format CI : CI-ABJ-2020-B-XXXXX.
+
+SECTION 4 — REPRÉSENTANT LÉGAL
+Champs : Nom, Prénoms, Qualité/Fonction, Nationalité, Type de pièce d'identité (CNI / Carte de séjour / Passeport), Numéro de pièce.
+OBLIGATOIRE : Le représentant légal doit être de nationalité IVOIRIENNE.
+
+SECTION 5 — STRUCTURE JURIDIQUE
+Forme juridique : SARL / SA / SAS / EI / ONG-Association / Autre.
+Capital social en FCFA.
+Composition de l'actionnariat : chaque actionnaire avec % de participation et nationalité.
+
+SECTION 6 — DESCRIPTION DU SERVICE
+- Services à exploiter (liste synthétique)
+- Description détaillée du fonctionnement, technologies utilisées, processus
+- Caractéristiques des équipements (serveurs, cloud, passerelles, etc.)
+L'ARTCI vérifie la cohérence entre le service déclaré et son exploitation réelle.
+
+SECTION 7 — OPÉRATEURS ET COUVERTURE
+Partenaires opérateurs : Orange CI, MTN CI, Moov Africa CI, Wave, Tous, Aucun (internet uniquement).
+Conditions d'accès aux services.
+Couverture géographique : Abidjan / Territoire national / CI + CEDEAO / International.
+Tarifs applicables aux utilisateurs.
+
+SECTION 8 — ENGAGEMENT ET SIGNATURE
+Engagement de respecter l'ordonnance n°2012-293 du 21 mars 2012.
+Nom/Prénoms et qualité du signataire, lieu de signature, email pour réception du récépissé.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ARRÊTÉ N°0099/MTND/CAB DU 16 AOÛT 2024 — CORRESPONDANT DPO
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

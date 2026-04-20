@@ -90,4 +90,7 @@ export const suiviPublic = (ref) => req(`/suivi/${ref}`)
 
 export const stripeCreateIntent = (d) => req('/paiement/stripe/create-intent', { method:'POST', body:JSON.stringify(d) })
 export const stripeConfirm      = (d) => req('/paiement/stripe/confirm',         { method:'POST', body:JSON.stringify(d) })
+export const soumettreGratuit   = (d) => req('/paiement/gratuit',                { method:'POST', body:JSON.stringify(d) })
+
+export const validerFormulaireComplet = (d) => req('/ia/valider-formulaire-complet', { method: 'POST', body: JSON.stringify(d) })
 

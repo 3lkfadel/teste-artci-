@@ -184,3 +184,49 @@ def send_dossier_status(to: str, reference: str, statut: str) -> bool:
     </div>
     """
     return send_email(to, f'[{APP_NAME}] Dossier {reference} — {label}', _base_template(contenu))
+
+
+def send_artci_validation(to: str, reference: str) -> bool:
+    contenu = f"""
+    <h2>Votre dossier a été validé par l'ARTCI</h2>
+    <p>Votre dossier <strong style="font-family:monospace">{reference}</strong> a été examiné et validé par un agent ARTCI.</p>
+
+    <div style="background:#f0fdf4; border-left:4px solid #22c55e; border-radius:6px; padding:16px; margin:20px 0;">
+      <div style="font-size:14px; font-weight:600; color:#166534;">✅ Dossier en cours d'instruction</div>
+      <div style="font-size:13px; color:#14532d; margin-top:6px;">
+        Votre dossier est désormais en cours d'instruction officielle par l'ARTCI.<br>
+        Vous serez notifié dès qu'une décision finale sera rendue.
+      </div>
+    </div>
+
+    <div style="text-align:center; margin:24px 0;">
+      <a href="{APP_URL}/suivi/{reference}" class="btn">Suivre mon dossier</a>
+    </div>
+    """
+    return send_email(to, f'[ARTCI] Dossier {reference} — Validé et en cours d\'instruction', _base_template(contenu))
+
+
+def send_artci_refus(to: str, reference: str, note_refus: str) -> bool:
+    contenu = f"""
+    <h2>Décision de l'ARTCI concernant votre dossier</h2>
+    <p>Votre dossier <strong style="font-family:monospace">{reference}</strong> a été examiné par un agent ARTCI.</p>
+
+    <div style="background:#fef2f2; border-left:4px solid #ef4444; border-radius:6px; padding:16px; margin:20px 0;">
+      <div style="font-size:14px; font-weight:600; color:#991b1b;">❌ Dossier refusé</div>
+      <div style="font-size:13px; color:#7f1d1d; margin-top:8px; line-height:1.6;">
+        <strong>Motif du refus :</strong><br>
+        {note_refus}
+      </div>
+    </div>
+
+    <p style="font-size:13px; color:#555; line-height:1.6;">
+      Vous pouvez soumettre une nouvelle demande en tenant compte de ces observations.
+      Si vous estimez que cette décision est injustifiée, vous pouvez introduire un recours
+      auprès de l'ARTCI dans les <strong>30 jours</strong>.
+    </p>
+
+    <div style="text-align:center; margin:24px 0;">
+      <a href="{APP_URL}/dashboard" class="btn">Soumettre une nouvelle demande</a>
+    </div>
+    """
+    return send_email(to, f'[ARTCI] Dossier {reference} — Décision de l\'ARTCI', _base_template(contenu))

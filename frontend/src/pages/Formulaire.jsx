@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import * as api from '../api.js'
+import ValidationPopup from './ValidationPopup.jsx'
 
 // ════════════════════════════════════════════════════════════
 // BIBLIOTHÈQUE DE SECTIONS RÉUTILISABLES
@@ -339,6 +340,230 @@ const CONFIGS = {
       { label: 'Signature', section: 'signature' },
     ],
   },
+  ussd: {
+    titre: 'Demande de code USSD',
+    etapes: [
+      {
+        label: 'Récépissé SVA',
+        section: null,
+        champs: [
+          { id: 'numero_recepisse_sva', label: 'Numéro du récépissé SVA', required: true,
+            placeholder: 'Ex: ARTCI-SVA-2024-001',
+            aide: "Ce numéro figure sur votre récépissé de déclaration SVA délivré par l'ARTCI. Il est obligatoire pour toute demande de code USSD." },
+          { id: 'date_recepisse_sva', label: "Date d'obtention du récépissé SVA", required: true, type: 'date' },
+        ],
+      },
+      {
+        label: 'Identité société',
+        section: null,
+        champs: [
+          { id: 'raison_sociale', label: 'Dénomination de la société', required: true },
+          { id: 'rccm_numero', label: 'Numéro RCCM', required: true, placeholder: 'CI-ABJ-2020-B-XXXXX' },
+          { id: 'adresse', label: 'Adresse du siège social', required: true },
+          { id: 'telephone', label: 'Téléphone', required: true, placeholder: '+225 07 XX XX XX XX' },
+          { id: 'email_contact', label: 'Email de contact', required: true, type: 'email' },
+        ],
+      },
+      {
+        label: 'Code USSD demandé',
+        section: null,
+        champs: [
+          { id: 'code_ussd_souhaite', label: 'Code USSD souhaité', required: true,
+            placeholder: 'Ex: *123# ou *456*1#',
+            aide: "Format : *XXX# ou *XXX*X#. Le choix définitif du numéro se fait au Guichet Unique ARTCI lors du dépôt. Indiquez votre préférence." },
+          { id: 'type_service_ussd', label: 'Type de service associé au code USSD', required: true, type: 'select',
+            options: [
+              { v: 'mobile_money', l: 'Service de paiement / Mobile Money' },
+              { v: 'renseignement', l: 'Service de renseignement' },
+              { v: 'bancaire', l: 'Service bancaire' },
+              { v: 'sante', l: 'Service de santé' },
+              { v: 'education', l: 'Service éducatif' },
+              { v: 'commerce', l: 'Service commercial / e-commerce' },
+              { v: 'agricole', l: 'Service agricole' },
+              { v: 'autre', l: 'Autre service' },
+            ] },
+          { id: 'description_service_ussd', label: 'Description détaillée du service USSD', required: true, type: 'textarea',
+            placeholder: "Décrivez précisément le fonctionnement du service accessible via ce code USSD...",
+            aide: "Expliquez le parcours utilisateur complet : que se passe-t-il quand l'utilisateur compose le code ?" },
+        ],
+      },
+      {
+        label: 'Opérateurs et couverture',
+        section: null,
+        champs: [
+          { id: 'operateurs_cibles', label: 'Opérateurs sur lesquels déployer le code USSD', required: true, type: 'checkboxes',
+            options: [
+              { v: 'orange', l: "Orange Côte d'Ivoire" },
+              { v: 'mtn', l: "MTN Côte d'Ivoire" },
+              { v: 'moov', l: "Moov Africa Côte d'Ivoire" },
+            ],
+            aide: "Les opérateurs sont tenus par l'ARTCI de mettre en œuvre les codes USSD attribués. Sélectionnez tous les opérateurs souhaités." },
+          { id: 'couverture_geo', label: 'Couverture géographique visée', required: true, type: 'select',
+            options: [
+              { v: 'abidjan', l: 'Abidjan uniquement' },
+              { v: 'national', l: 'Ensemble du territoire ivoirien' },
+            ] },
+          { id: 'nombre_utilisateurs_estimes', label: "Nombre d'utilisateurs estimés", required: true, type: 'select',
+            options: [
+              { v: 'moins_1000', l: 'Moins de 1 000 utilisateurs' },
+              { v: '1000_10000', l: 'Entre 1 000 et 10 000 utilisateurs' },
+              { v: '10000_100000', l: 'Entre 10 000 et 100 000 utilisateurs' },
+              { v: 'plus_100000', l: 'Plus de 100 000 utilisateurs' },
+            ] },
+        ],
+      },
+      {
+        label: 'Représentant et engagement',
+        section: null,
+        champs: [
+          { id: 'rep_nom', label: 'Nom et prénoms du représentant légal', required: true },
+          { id: 'rep_qualite', label: 'Qualité / Fonction', required: true, placeholder: 'Ex: Directeur Général' },
+          { id: 'rep_nationalite', label: 'Nationalité', required: true, placeholder: 'Ivoirienne' },
+          { id: 'engagement', label: 'Engagement réglementaire', required: true, type: 'select',
+            options: [{ v: 'oui', l: "Je m'engage à respecter la décision n°2023-966 du 19 octobre 2023 et l'ordonnance n°2012-293 du 21 mars 2012 relative aux Télécommunications et TIC" }] },
+          { id: 'email_recepisse', label: 'Email pour notifications', required: true, type: 'email' },
+        ],
+      },
+    ],
+  },
+  sva: {
+    titre: 'Déclaration SVA — Service à Valeur Ajoutée',
+    etapes: [
+      {
+        label: 'Type de demande',
+        section: null,
+        champs: [
+          { id: 'type_demande', label: 'Type de demande', required: true, type: 'select',
+            options: [{ v: 'premiere', l: 'Première demande' }, { v: 'renouvellement', l: 'Renouvellement' }] },
+          { id: 'numero_recepisse_ancien', label: 'Numéro du récépissé (si renouvellement)', placeholder: 'Ex: ARTCI-SVA-2022-001' },
+          { id: 'date_echeance_ancien', label: "Date d'échéance du récépissé (si renouvellement)", type: 'date' },
+        ],
+      },
+      {
+        label: 'Type de service',
+        section: null,
+        champs: [
+          { id: 'types_services', label: 'Service(s) à fournir', required: true, type: 'checkboxes',
+            options: [
+              { v: 'plateforme_web', l: "Mise en place d'une plateforme Web" },
+              { v: 'messagerie', l: 'Messagerie vocale et/ou écrite (SVA)' },
+              { v: 'call_center', l: "Exploitation d'un centre d'appel téléphonique (SVA)" },
+              { v: 'autres', l: 'Autres types (à préciser)' },
+            ],
+            aide: "SVA = Service à Valeur Ajoutée. Cochez tous les services que vous souhaitez fournir." },
+          { id: 'autres_services_detail', label: 'Si autres types, précisez', placeholder: 'Décrivez le type de service...' },
+        ],
+      },
+      {
+        label: 'Identité de la société',
+        section: null,
+        champs: [
+          { id: 'raison_sociale', label: 'Dénomination de la société ou raison sociale', required: true },
+          { id: 'adresse_geo', label: 'Adresse géographique précise du siège social', required: true, type: 'textarea',
+            placeholder: 'Quartier, Commune, Immeuble, N° ...',
+            aide: 'Un schéma du lieu sur papier A4 devra être joint au dossier physique.' },
+          { id: 'adresse_postale', label: 'Adresse postale', required: true, placeholder: 'BP XXXX Abidjan XX' },
+          { id: 'telephone_mobile', label: 'Numéro de téléphone mobile', required: true, placeholder: '+225 07 XX XX XX XX' },
+          { id: 'telephone_fixe', label: 'Numéro de téléphone fixe', placeholder: '+225 27 XX XX XX XX' },
+          { id: 'rccm_numero', label: "Numéro d'inscription au Registre du Commerce ivoirien", required: true,
+            placeholder: 'CI-ABJ-2020-B-XXXXX',
+            aide: 'Format RCCM ivoirien : CI-ABJ-ANNÉE-B-NUMÉRO. Différent du N°CC fiscal.' },
+          { id: 'rccm_date', label: "Date d'inscription au RCCM", required: true, type: 'date' },
+          { id: 'activites_principales', label: 'Activités principales de la société', required: true, type: 'textarea',
+            placeholder: 'Ex: Développement de logiciels, Services numériques...' },
+        ],
+      },
+      {
+        label: 'Représentant légal',
+        section: null,
+        champs: [
+          { id: 'rep_nom', label: 'Nom du représentant légal', required: true },
+          { id: 'rep_prenoms', label: 'Prénoms', required: true },
+          { id: 'rep_qualite', label: 'Qualité / Fonction', required: true, placeholder: 'Ex: Directeur Général, Gérant...' },
+          { id: 'rep_nationalite', label: 'Nationalité', required: true, placeholder: 'Ivoirienne',
+            aide: '⚠️ Le représentant légal doit être de nationalité ivoirienne.' },
+          { id: 'rep_piece_type', label: "Type de pièce d'identité", required: true, type: 'select',
+            options: [
+              { v: 'cni', l: "Carte Nationale d'Identité (CNI)" },
+              { v: 'sejour', l: 'Carte de séjour' },
+              { v: 'passeport', l: 'Passeport' },
+            ] },
+          { id: 'rep_piece_numero', label: "Numéro de la pièce d'identité", required: true },
+        ],
+      },
+      {
+        label: 'Structure juridique',
+        section: null,
+        champs: [
+          { id: 'forme_juridique', label: 'Forme juridique de la société', required: true, type: 'select',
+            options: [
+              { v: 'sarl', l: 'SARL (Société à Responsabilité Limitée)' },
+              { v: 'sa', l: 'SA (Société Anonyme)' },
+              { v: 'sas', l: 'SAS (Société par Actions Simplifiée)' },
+              { v: 'ei', l: 'EI (Entreprise Individuelle)' },
+              { v: 'ong', l: 'ONG / Association' },
+              { v: 'autre', l: 'Autre' },
+            ] },
+          { id: 'capital_social', label: 'Capital social (en FCFA)', required: true, placeholder: 'Ex: 1 000 000' },
+          { id: 'actionnariat', label: "Composition de l'actionnariat", required: true, type: 'textarea',
+            placeholder: 'Actionnaire 1 : Nom — X% — Nationalité\nActionnaire 2 : Nom — X% — Nationalité\n...',
+            aide: 'Listez tous les actionnaires avec leur participation en % et leur nationalité.' },
+        ],
+      },
+      {
+        label: 'Description du service',
+        section: null,
+        champs: [
+          { id: 'services_exploites', label: 'Quels services souhaitez-vous exploiter ?', required: true, type: 'textarea',
+            placeholder: 'Ex: Service de messagerie SMS marketing, Plateforme e-commerce...' },
+          { id: 'description_detaillee', label: 'Description détaillée du ou des services fournis', required: true, type: 'textarea',
+            placeholder: 'Décrivez précisément le fonctionnement du service, les technologies utilisées, le processus...',
+            aide: "Soyez précis et exhaustif. L'ARTCI vérifiera la cohérence entre le service déclaré et son exploitation." },
+          { id: 'caracteristiques_equipements', label: 'Caractéristiques des équipements', required: true, type: 'textarea',
+            placeholder: 'Ex: Serveurs Linux, Infrastructure cloud AWS, Passerelle SMS...' },
+        ],
+      },
+      {
+        label: 'Opérateurs et couverture',
+        section: null,
+        champs: [
+          { id: 'partenaires_operateurs', label: 'Partenaires opérateurs', required: true, type: 'checkboxes',
+            options: [
+              { v: 'orange', l: "Orange Côte d'Ivoire" },
+              { v: 'mtn', l: "MTN Côte d'Ivoire" },
+              { v: 'moov', l: "Moov Africa Côte d'Ivoire" },
+              { v: 'wave', l: 'Wave' },
+              { v: 'tous', l: 'Tous les opérateurs' },
+              { v: 'aucun', l: 'Aucun (service internet uniquement)' },
+            ] },
+          { id: 'conditions_acces', label: "Conditions d'accès aux services proposés", required: true, type: 'textarea',
+            placeholder: 'Ex: Accessible via application mobile iOS/Android, abonnement mensuel requis, inscription en ligne...' },
+          { id: 'couverture_geo', label: 'Couverture géographique visée', required: true, type: 'select',
+            options: [
+              { v: 'abidjan', l: 'Abidjan uniquement' },
+              { v: 'national', l: 'Ensemble du territoire ivoirien' },
+              { v: 'cedeao', l: "Côte d'Ivoire + CEDEAO" },
+              { v: 'international', l: 'International' },
+            ] },
+          { id: 'tarifs', label: 'Tarifs applicables', required: true, type: 'textarea',
+            placeholder: 'Ex: Gratuit pour les particuliers, 50 000 FCFA/mois pour les entreprises...' },
+        ],
+      },
+      {
+        label: 'Engagement et signature',
+        section: null,
+        champs: [
+          { id: 'engagement_reglementaire', label: 'Engagement réglementaire', required: true, type: 'select',
+            options: [{ v: 'oui', l: "Je m'engage à respecter l'ordonnance n°2012-293 du 21 mars 2012 relative aux Télécommunications et aux Technologies de l'Information et de la Communication" }],
+            aide: 'Cette ordonnance est consultable sur www.artci.ci' },
+          { id: 'signataire_nom', label: 'Nom et prénoms du signataire', required: true },
+          { id: 'signataire_qualite', label: 'Qualité du signataire', required: true, placeholder: 'Ex: Directeur Général' },
+          { id: 'lieu_signature', label: 'Fait à (ville)', required: true, placeholder: 'Ex: Abidjan' },
+          { id: 'email_recepisse', label: 'Email pour réception du récépissé ARTCI', required: true, type: 'email' },
+        ],
+      },
+    ],
+  },
 }
 
 // ════════════════════════════════════════════════════════════
@@ -486,6 +711,9 @@ export default function Formulaire() {
   const [analyzing, setAnalyzing]       = useState({})
   const [errorsChamps, setErrorsChamps] = useState({})
   const [loading, setLoading]           = useState(false)
+  const [verifIa, setVerifIa]           = useState(false)
+  const [showValidationPopup, setShowValidationPopup] = useState(false)
+  const [validationErreurs, setValidationErreurs]     = useState([])
   const [err, setErr]                   = useState('')
   const [chatVisible, setChatVisible]   = useState(false)
   const [autoSaveStatus, setAutoSaveStatus] = useState('')
@@ -625,8 +853,25 @@ export default function Formulaire() {
       setLoading(true)
       try {
         if (id) await api.majDossier(id, { donnees, statut:'en_attente_signature' })
-        nav(`/signature/${id}`)
-      } catch (e) { setErr(e.message) } finally { setLoading(false) }
+      } catch (e) { setErr(e.message); setLoading(false); return }
+      setLoading(false)
+
+      // Vérification IA avant signature
+      if (id) {
+        setVerifIa(true)
+        try {
+          const r = await api.validerFormulaireComplet({ dossier_id: parseInt(id) })
+          if (r.nb_erreurs >= 3) {
+            setValidationErreurs(r.erreurs || [])
+            setShowValidationPopup(true)
+            setVerifIa(false)
+            return
+          }
+        } catch {}
+        setVerifIa(false)
+      }
+
+      nav(`/signature/${id}`)
       return
     }
 
@@ -768,8 +1013,8 @@ export default function Formulaire() {
           <button className="btn btn-secondary" onClick={retour} disabled={loading}>
             {etape===0 ? '← Annuler' : '← Retour'}
           </button>
-          <button className="btn btn-primary" onClick={suivant} disabled={loading}>
-            {loading ? 'Finalisation...' : estDerniere ? 'Passer à la signature →' : 'Suivant →'}
+          <button className="btn btn-primary" onClick={suivant} disabled={loading || verifIa}>
+            {verifIa ? 'Vérification en cours...' : loading ? 'Finalisation...' : estDerniere ? 'Passer à la signature →' : 'Suivant →'}
           </button>
         </div>
       </div>
@@ -781,6 +1026,14 @@ export default function Formulaire() {
       )}
 
       <ChatAssistant config={config} etapeIndex={etape} donnees={donnees} visible={chatVisible} onClose={()=>setChatVisible(false)} />
+
+      {showValidationPopup && (
+        <ValidationPopup
+          erreurs={validationErreurs}
+          onCorrection={() => setShowValidationPopup(false)}
+          onContinuer={() => { setShowValidationPopup(false); nav(`/signature/${id}`) }}
+        />
+      )}
     </>
   )
 }

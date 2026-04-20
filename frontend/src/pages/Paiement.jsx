@@ -11,6 +11,8 @@ const LABELS_TYPE = {
   autorisation: "Demande d'autorisation",
   dpo:          'Correspondant DPO',
   transfert:    'Transfert international',
+  sva:          'Déclaration SVA',
+  ussd:         'Demande de code USSD',
 }
 
 const FRAIS_FCFA = {
@@ -18,6 +20,8 @@ const FRAIS_FCFA = {
   autorisation: 16000,
   dpo:          5000,
   transfert:    12000,
+  sva:          1798000,
+  ussd:         0,
 }
 
 function formatFCFA(montant) {
@@ -87,15 +91,21 @@ export default function Paiement() {
   const [erreur, setErreur]             = useState('')
   const [succes, setSucces]             = useState(false)
   const [loading, setLoading]           = useState(true)
+  const [gratuit, setGratuit]           = useState(false)
+  const [soumission, setSoumission]     = useState(false)
 
   useEffect(() => {
     async function init() {
       try {
         const dos = await api.getDossier(id)
         setDossier(dos)
-        const r = await api.stripeCreateIntent({ dossier_id: parseInt(id) })
-        setClientSecret(r.client_secret)
-        setMontant(r.montant_fcfa)
+        if (FRAIS_FCFA[dos.type_formulaire] === 0) {
+          setGratuit(true)
+        } else {
+          const r = await api.stripeCreateIntent({ dossier_id: parseInt(id) })
+          setClientSecret(r.client_secret)
+          setMontant(r.montant_fcfa)
+        }
       } catch (e) {
         setErreur(e.message || 'Impossible de charger le paiement.')
       } finally {
@@ -104,6 +114,18 @@ export default function Paiement() {
     }
     init()
   }, [id])
+
+  async function soumettreSansPayment() {
+    setSoumission(true)
+    try {
+      await api.soumettreGratuit({ dossier_id: parseInt(id) })
+      setSucces(true)
+      setTimeout(() => nav('/dashboard'), 3000)
+    } catch (e) {
+      setErreur(e.message || 'Erreur lors de la soumission.')
+      setSoumission(false)
+    }
+  }
 
   function handleSucces() {
     setSucces(true)
@@ -125,6 +147,43 @@ export default function Paiement() {
         {loading && (
           <div className="card" style={{ textAlign: 'center', padding: 48 }}>
             <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Chargement du paiement...</div>
+          </div>
+        )}
+
+        {/* Dossier gratuit (USSD) */}
+        {!loading && !erreur && !succes && gratuit && dossier && (
+          <div className="card" style={{ textAlign: 'center', padding: 40 }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>📡</div>
+            <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8, color: 'var(--text)' }}>Demande de code USSD</div>
+            <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, padding: '12px 16px', marginBottom: 20, textAlign: 'left' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#166534', marginBottom: 6 }}>Gratuit — Décision n°2023-966 du 19 octobre 2023</div>
+              <div style={{ fontSize: 12, color: '#166534', lineHeight: 1.6 }}>
+                La demande de code USSD est <strong>exempte de frais</strong> depuis la décision ARTCI du 19/10/2023.
+              </div>
+            </div>
+            <div style={{ background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 8, padding: '14px 16px', marginBottom: 24, textAlign: 'left' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#92400E', marginBottom: 8 }}>⚠️ Dépôt physique requis au Guichet ARTCI</div>
+              <div style={{ fontSize: 12, color: '#78350F', lineHeight: 1.7 }}>
+                <div>📍 Guichet Unique ARTCI — Marcory Anoumabo</div>
+                <div>📞 +225 27 20 34 43 68</div>
+                <div>✉️ kadjo.sandrine@artci.ci — traore.abou@artci.ci</div>
+                <div style={{ marginTop: 6 }}>Le choix définitif du numéro USSD se fait <strong>sur place</strong> lors du dépôt du dossier.</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 24 }}>
+              Référence : <strong style={{ fontFamily: 'var(--mono)' }}>{dossier.reference}</strong>
+            </div>
+            <button
+              className="btn btn-primary btn-full"
+              onClick={soumettreSansPayment}
+              disabled={soumission}
+              style={{ marginBottom: 12 }}
+            >
+              {soumission ? 'Soumission en cours...' : 'Confirmer et soumettre le dossier'}
+            </button>
+            <button className="btn-link" style={{ fontSize: 12, color: 'var(--text-3)' }} onClick={() => nav('/dashboard')}>
+              ← Retour au tableau de bord
+            </button>
           </div>
         )}
 
